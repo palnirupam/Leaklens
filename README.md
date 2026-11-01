@@ -410,6 +410,20 @@ In the benchmark this achieves the same precision/recall as the signal-level
 baseline **while improving root-cause accuracy** (0.8 → 1.0) and staying below
 the "run-all-experiments" upper bound in mean experiment count.
 
+**Red-team hardening (2026).** Two adversarial reviews exposed and led to
+fixes:
+
+- *Legitimate strong feature trap* — a strong but valid predictor (e.g. tumour
+  size) was being labelled "confirmed critical leak" purely because removing it
+  dropped AUC. Fixed by gating confirmation on mechanism-level evidence, so
+  findings are downgraded to "suspicious — manual review" when no mechanism is
+  proven, and the advice text is now conditional.
+- *Stealth XOR interaction* — a 100%-informative pairwise interaction with zero
+  individual-feature signal was invisible. Fixed with a shallow-tree pairwise
+  interaction scan that surfaces such cases as review flags (never confirmed).
+  Regression tests in `backend/tests/test_redteam_fixes.py` cover both; both
+  benchmarks are unchanged.
+
 Gemini-only analysis is wired into the harness but is reported as **skipped**
 unless a valid key is configured — we never fabricate its results.
 
@@ -440,10 +454,16 @@ unless a valid key is configured — we never fabricate its results.
   real-world leakage patterns may differ from the injected scenarios.
 - Gemini suggestions affect only hypothesis generation; Python always executes
   the numerical experiments.
-- Confirmation of target-derived leaks requires >10% whole-model AUC drop on
-  ablation; on feature-rich real datasets a weak leak may be conservatively
-  missed (precision-first). Verified against a real-data benchmark
+- Target-derived leaks are never auto-labelled "confirmed" from predictive power
+  alone: confirmation additionally requires mechanism-level evidence (e.g.
+  static analysis showing the feature is computed from target/future). Without
+  it the finding is kept at "potential/suspicious — manual review". On
+  feature-rich real datasets a weak leak may still be conservatively missed
+  (precision-first). Verified against a real-data benchmark
   (`python -m benchmarks.run_real_benchmark`).
+- Pairwise **interaction leaks** (weak individual signals, strong joint signal —
+  e.g. XOR) are surfaced as review-only flags (`feature_interaction_leakage`);
+  they are never auto-confirmed, since strong legitimate interactions are normal.
 - Uploads/reports are stored locally; no production-grade authentication or
   multi-user features are included.
 

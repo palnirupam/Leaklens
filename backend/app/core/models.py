@@ -21,6 +21,7 @@ LEAKAGE_CATEGORIES = (
     "train_test_contamination",  # duplicates / entity overlap across splits
     "preprocessing_leakage",    # fit-before-split transforms
     "temporal_leakage",         # future information via random split
+    "feature_interaction_leakage",  # strong *joint* signal, weak marginals (review)
     "correlation_suspicious",   # high predictive power, needs manual review
     "none_detected",            # no leak found by supported checks
 )

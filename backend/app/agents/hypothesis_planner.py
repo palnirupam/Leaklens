@@ -20,6 +20,7 @@ CATEGORY_LABELS = {
     "duplicate_contamination": "Train/test contamination via duplicates",
     "preprocessing_leakage": "Preprocessing fitted before split (static)",
     "temporal_leakage": "Temporal leakage / future information",
+    "feature_interaction_leakage": "Strong joint signal with weak individual signals",
 }
 
 
@@ -124,6 +125,23 @@ class HypothesisPlanner:
                         "training. Chronological splits prevent this."
                     ),
                     affected=[feat] if feat else [],
+                )
+            )
+
+        # 3b) interaction signals (review-only, never automatically confirmed)
+        for fi, fj, best_single, joint in signals.interaction_features:
+            hypotheses.append(
+                _make_hypothesis(
+                    investigation_id,
+                    "feature_interaction_leakage",
+                    f"Features `{fi}` and `{fj}` are only predictive together",
+                    f"Joint nonlinear signal AUC≈{joint:.2f} vs best single-feature AUC≈{best_single:.2f}.",
+                    (
+                        "Neither feature is predictive on its own, but their combination "
+                        "carries the signal. This can indicate an unusual/derived interaction "
+                        "or simply a strong legitimate pattern — verify these columns' origin."
+                    ),
+                    affected=[fi, fj],
                 )
             )
 

@@ -22,8 +22,8 @@
     "false_positive_rate_clean": 0.667,
     "root_cause_accuracy": 0.857,
     "mean_experiments": 0.0,
-    "mean_seconds": 1.59,
-    "total_seconds": 14.3
+    "mean_seconds": 1.71,
+    "total_seconds": 15.4
   },
   "leaklens_adaptive": {
     "n_cases": 9,
@@ -36,8 +36,8 @@
     "false_positive_rate_clean": 0.0,
     "root_cause_accuracy": 1.0,
     "mean_experiments": 8.56,
-    "mean_seconds": 23.46,
-    "total_seconds": 211.1
+    "mean_seconds": 22.35,
+    "total_seconds": 201.1
   },
   "run_all_experiments_mean": 15.33,
   "per_case": [

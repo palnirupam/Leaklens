@@ -22,9 +22,11 @@ EVIDENCE_STRENGTH = {
 
 CORRECTIONS = {
     "target_derived_feature": (
-        "Verify the feature's origin. If it is derived from the target or from "
-        "future information, remove it and retrain. Ensure the feature is truly "
-        "available at prediction time."
+        "High feature-target association is NOT proof of leakage on its own. "
+        "Only remove this column if you can verify it is genuinely derived from "
+        "the target, from future information, or otherwise unavailable at "
+        "prediction time; otherwise it may simply be a legitimate strong "
+        "predictor — keep it, but document why it is safe."
     ),
     "prediction_time_unavailable": (
         "Exclude this feature from the production model (it is not available at "
@@ -84,6 +86,16 @@ class EvidenceVerifier:
                 "hazard, not evidence of train/test contamination.",
             )
 
+        # Interaction flags are review-only — never auto-confirmed as leakage.
+        if h.category == "feature_interaction_leakage":
+            return self._build(
+                investigation, h, "medium", "suspicious",
+                "Two features are individually uninformative but strongly predictive "
+                "together. This is NOT proof of leakage: verify whether the "
+                "combination is derived from target/future information or is simply "
+                "a legitimate interaction before acting on it.",
+            )
+
         if not results:
             h.status = "inconclusive"
             if h.category == "duplicate_contamination" and investigation.config.entity_column:
@@ -107,6 +119,15 @@ class EvidenceVerifier:
             status = "strong"
             severity = "high"
         h.status = "confirmed" if status == "confirmed" else "investigating"
+
+        # Predictive power alone must not be labelled "confirmed leak". Only a
+        # mechanism-level reason (e.g. static analysis showing the feature is
+        # computed from target/future) justifies confirmation; otherwise we keep
+        # it as a strong signal flagged for manual review.
+        if h.category == "target_derived_feature" and not h.code_paths:
+            status = "potential"
+            severity = "medium"
+            h.status = "investigating"
 
         return self._build(
             investigation, h, severity, status,

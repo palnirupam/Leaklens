@@ -9,7 +9,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
+import numpy as np
 import pandas as pd
+from sklearn.metrics import roc_auc_score
+from sklearn.model_selection import StratifiedKFold
+from sklearn.tree import DecisionTreeClassifier
 
 from app.ml.pipeline import evaluate_split
 
@@ -33,6 +37,9 @@ class DetectionSignals:
     timestamp_column: Optional[str] = None
     #: features excluded because they are unavailable at prediction time
     prediction_time_unavailable: list[str] = field(default_factory=list)
+    #: feature pairs whose *joint* nonlinear signal is strong while each feature
+    #: alone is uninformative (e.g. XOR-style interactions): (f1, f2, best_single_auc, joint_auc)
+    interaction_features: list[tuple[str, str, float, float]] = field(default_factory=list)
 
 
 def detect_signals(
@@ -92,4 +99,67 @@ def detect_signals(
         except Exception as exc:  # noqa: BLE001
             signals.temporal = {"error": str(exc)}
 
+    # 4) interaction check: pairs with a strong *joint* signal but weak marginals
+    signals.interaction_features = _detect_interactions(
+        df, target_column, seed=seed
+    )
+
     return signals
+
+
+def _pair_auc(
+    sub: pd.DataFrame, feats: list[str], target: str, seed: int
+) -> float:
+    """Cross-validated ROC-AUC of a shallow decision tree on the given features."""
+    X = sub[feats].to_numpy(dtype=float)
+    y = sub[target].to_numpy(dtype=int)
+    skf = StratifiedKFold(n_splits=3, shuffle=True, random_state=seed)
+    aucs: list[float] = []
+    for tr, te in skf.split(X, y):
+        if len(np.unique(y[tr])) < 2:
+            continue
+        clf = DecisionTreeClassifier(max_depth=4, random_state=seed)
+        clf.fit(X[tr], y[tr])
+        if clf.predict_proba(X[te]).shape[1] < 2:
+            continue
+        prob = clf.predict_proba(X[te])[:, 1]
+        aucs.append(float(roc_auc_score(y[te], prob)))
+    return float(np.mean(aucs)) if aucs else 0.5
+
+
+def _detect_interactions(
+    df: pd.DataFrame,
+    target_column: str,
+    seed: int = 42,
+    max_pairs_features: int = 7,
+    sample: int = 3000,
+) -> list[tuple[str, str, float, float]]:
+    """Find numeric feature pairs that reveal a strong *joint* signal while each
+    feature is individually weak (e.g. XOR-style). Uses a shallow tree so that
+    nonlinear interactions are visible — a linear model cannot see XOR.
+
+    This is an intentionally conservative *flag* (review), not proof of leak.
+    """
+    numeric = [
+        c for c in df.columns
+        if c != target_column and df[c].dtype.kind in "iufc"
+    ]
+    if len(numeric) < 2:
+        return []
+    sub = df[numeric + [target_column]]
+    if len(sub) > sample:
+        sub = sub.sample(sample, random_state=seed)
+    cols = numeric[:max_pairs_features]
+    out: list[tuple[str, str, float, float]] = []
+    for i in range(len(cols)):
+        for j in range(i + 1, len(cols)):
+            fi, fj = cols[i], cols[j]
+            try:
+                mi = _pair_auc(sub, [fi], target_column, seed)
+                mj = _pair_auc(sub, [fj], target_column, seed)
+                joint = _pair_auc(sub, [fi, fj], target_column, seed)
+            except Exception:  # noqa: BLE001
+                continue
+            if max(mi, mj) < 0.6 and joint >= 0.85:
+                out.append((fi, fj, round(max(mi, mj), 3), round(joint, 3)))
+    return out
