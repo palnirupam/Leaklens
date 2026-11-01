@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+node_modules/
+frontend/.vite/
+*.tsbuildinfo
+
+# Environment / secrets
+.env
+.env.local
+frontend/.env.local
+.env.*
+!.env.example
+
+# Data & caches
+data/demo/bank_marketing.csv
+*.sqlite3
+*.db
+data/cache/
+*.log
+
+# OS / editor
+Thumbs.db
+Desktop.ini
+.DS_Store
+.idea/
+.vscode/
+*.swp

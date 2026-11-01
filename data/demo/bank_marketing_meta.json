@@ -1,0 +1,10 @@
+{
+  "source": "ucimlrepo",
+  "uci_id": 222,
+  "name": "Bank Marketing (UCI)",
+  "rows": 45211,
+  "columns": 17,
+  "target": "y",
+  "duration_column": "duration",
+  "fallback": false
+}

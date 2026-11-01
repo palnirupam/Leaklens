@@ -1,0 +1,122 @@
+{
+  "datasets": [
+    "bank",
+    "bank_duplicate",
+    "bank_temporal",
+    "breast",
+    "breast_prediction_time",
+    "breast_target_derived",
+    "wine",
+    "wine_duplicate",
+    "wine_target_derived"
+  ],
+  "n_cases": 9,
+  "rule_based_baseline": {
+    "n_cases": 9,
+    "true_pos": 7,
+    "false_pos": 4,
+    "false_neg": 0,
+    "precision": 0.636,
+    "recall": 1.0,
+    "f1": 0.778,
+    "false_positive_rate_clean": 0.667,
+    "root_cause_accuracy": 0.857,
+    "mean_experiments": 0.0,
+    "mean_seconds": 1.59,
+    "total_seconds": 14.3
+  },
+  "leaklens_adaptive": {
+    "n_cases": 9,
+    "true_pos": 5,
+    "false_pos": 0,
+    "false_neg": 2,
+    "precision": 1.0,
+    "recall": 0.714,
+    "f1": 0.833,
+    "false_positive_rate_clean": 0.0,
+    "root_cause_accuracy": 1.0,
+    "mean_experiments": 8.56,
+    "mean_seconds": 23.46,
+    "total_seconds": 211.1
+  },
+  "run_all_experiments_mean": 15.33,
+  "per_case": [
+    {
+      "case": "wine_clean",
+      "truth": [],
+      "predicted": [],
+      "verdict": "OK"
+    },
+    {
+      "case": "wine_target_derived_feature",
+      "truth": [
+        "target_derived_feature"
+      ],
+      "predicted": [],
+      "verdict": "MISS"
+    },
+    {
+      "case": "wine_duplicate_contamination",
+      "truth": [
+        "duplicate_contamination"
+      ],
+      "predicted": [
+        "duplicate_contamination"
+      ],
+      "verdict": "OK"
+    },
+    {
+      "case": "breast_clean",
+      "truth": [],
+      "predicted": [],
+      "verdict": "OK"
+    },
+    {
+      "case": "breast_target_derived_feature",
+      "truth": [
+        "target_derived_feature"
+      ],
+      "predicted": [],
+      "verdict": "MISS"
+    },
+    {
+      "case": "breast_prediction_time_unavailable",
+      "truth": [
+        "prediction_time_unavailable"
+      ],
+      "predicted": [
+        "prediction_time_unavailable"
+      ],
+      "verdict": "OK"
+    },
+    {
+      "case": "bank_clean",
+      "truth": [],
+      "predicted": [],
+      "verdict": "OK"
+    },
+    {
+      "case": "bank_temporal_leakage",
+      "truth": [
+        "target_derived_feature",
+        "temporal_leakage"
+      ],
+      "predicted": [
+        "target_derived_feature",
+        "temporal_leakage"
+      ],
+      "verdict": "OK"
+    },
+    {
+      "case": "bank_duplicate_contamination",
+      "truth": [
+        "duplicate_contamination"
+      ],
+      "predicted": [
+        "duplicate_contamination"
+      ],
+      "verdict": "OK"
+    }
+  ],
+  "note": "Real data from sklearn (Wine, Breast Cancer) + UCI Bank Marketing; each case has one documented leakage injection. Adaptive confirms leaks with budget-aware experiments while keeping the experiment count below the run-all bound."
+}
