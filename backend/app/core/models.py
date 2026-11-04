@@ -17,9 +17,10 @@ INVESTIGATION_STATUS = ("queued", "running", "completed", "failed", "cancelled")
 
 LEAKAGE_CATEGORIES = (
     "target_derived_feature",   # A feature is computed from/contains target info
-    "prediction_time_availability",  # feature unavailable at prediction time (not leak)
-    "train_test_contamination",  # duplicates / entity overlap across splits
+    "prediction_time_unavailable",  # feature unavailable at prediction time (not leak)
+    "duplicate_contamination",  # duplicates / entity overlap across splits
     "preprocessing_leakage",    # fit-before-split transforms
+    "evaluation_protocol_risk",  # missing/unsafe validation split
     "temporal_leakage",         # future information via random split
     "feature_interaction_leakage",  # strong *joint* signal, weak marginals (review)
     "correlation_suspicious",   # high predictive power, needs manual review

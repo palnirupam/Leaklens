@@ -25,7 +25,7 @@ EXPERIMENT_META: dict[str, dict[str, Any]] = {
         "diagnostic_value": 1.0,
     },
     "permutation_test": {
-        "label": "Shuffled-target sanity check",
+        "label": "Suspicious-feature permutation test",
         "cost_ms": 500.0,
         "diagnostic_value": 0.9,
     },
@@ -56,10 +56,12 @@ def _run_feature_ablation(
     df: pd.DataFrame, target: str, params: dict[str, Any], seed: int
 ) -> ExperimentResult:
     feat = params["feature"]
+    if feat not in df.columns:
+        raise ValueError(f"Feature {feat!r} is missing from the dataset.")
     other = [c for c in df.columns if c not in (target, feat, params.get("timestamp_column"), params.get("entity_column"))]
     baseline = cross_val_auc(df, other + [feat], target, seed=seed)
-    ablated = cross_val_auc(df, other, target, seed=seed)
-    drop = baseline["cv_auc_mean"] - ablated["cv_auc_mean"]
+    ablated_auc = cross_val_auc(df, other, target, seed=seed)["cv_auc_mean"] if other else 0.5
+    drop = baseline["cv_auc_mean"] - ablated_auc
     return ExperimentResult(
         experiment_id=params.get("experiment_id", ""),
         hypothesis_id=params.get("hypothesis_id", ""),
@@ -69,7 +71,7 @@ def _run_feature_ablation(
         config={"feature": feat, "seed": seed},
         metrics={
             "all_features_auc": baseline["cv_auc_mean"],
-            "ablated_auc": ablated["cv_auc_mean"],
+            "ablated_auc": ablated_auc,
             "auc_drop": drop,
         },
         evidence={
@@ -93,13 +95,15 @@ def _run_permutation(
     df: pd.DataFrame, target: str, params: dict[str, Any], seed: int
 ) -> ExperimentResult:
     feat = params["feature"]
+    if feat not in df.columns:
+        raise ValueError(f"Feature {feat!r} is missing from the dataset.")
     other = [c for c in df.columns if c not in (target, feat, params.get("timestamp_column"), params.get("entity_column"))]
-    shuffled = df.copy()
+    permuted = df.copy()
     rng = __import__("numpy").random.default_rng(seed)
-    perm = rng.permutation(len(shuffled))
-    shuffled.loc[:, target] = shuffled[target].iloc[perm].values
-    shuffled_auc = cross_val_auc(shuffled, other + [feat], target, seed=seed)["cv_auc_mean"]
+    permuted.loc[:, feat] = rng.permutation(permuted[feat].to_numpy())
+    permuted_auc = cross_val_auc(permuted, other + [feat], target, seed=seed)["cv_auc_mean"]
     real_auc = cross_val_auc(df, other + [feat], target, seed=seed)["cv_auc_mean"]
+    drop = real_auc - permuted_auc
     return ExperimentResult(
         experiment_id=params.get("experiment_id", ""),
         hypothesis_id=params.get("hypothesis_id", ""),
@@ -107,17 +111,23 @@ def _run_permutation(
         category="target_derived_feature",
         status="completed",
         config={"feature": feat, "seed": seed},
-        metrics={"real_auc": real_auc, "shuffled_auc": shuffled_auc, "gap": real_auc - shuffled_auc},
+        metrics={
+            "real_auc": real_auc,
+            "permuted_feature_auc": permuted_auc,
+            "auc_drop": drop,
+        },
         evidence={
             "real_auc": real_auc,
-            "shuffled_auc": shuffled_auc,
+            "permuted_feature_auc": permuted_auc,
+            "auc_drop": drop,
             "explanation": (
-                f"Real CV-AUC={real_auc:.3f} vs shuffled-target CV-AUC={shuffled_auc:.3f}. "
-                "If the model still performs well on shuffled labels, the predictive signal "
-                "does not depend on the target (less indicative of target leakage)."
+                f"Real CV-AUC={real_auc:.3f} vs CV-AUC={permuted_auc:.3f} after "
+                f"permuting `{feat}`. A large drop shows that this specific feature "
+                "carries predictive information; it still does not prove that the "
+                "feature was derived from the target or future data."
             ),
         },
-        interpretation="target-linked" if real_auc - shuffled_auc > 0.1 else "not_target_linked",
+        interpretation="feature_dependent" if drop > 0.1 else "not_feature_dependent",
     )
 
 
@@ -139,18 +149,28 @@ def _run_duplicate_conflict(
             "duplicate_rows": sig.duplicate_rows,
             "conflicting_duplicates": sig.conflicting_duplicates,
             "entity_conflicts": sig.entity_conflicts,
+            "repeated_entities": sig.repeated_entities,
+            "repeated_entity_rows": sig.repeated_entity_rows,
         },
         evidence={
             "duplicate_rows": sig.duplicate_rows,
             "conflicting_duplicates": sig.conflicting_duplicates,
+            "entity_conflicts": sig.entity_conflicts,
+            "repeated_entities": sig.repeated_entities,
+            "repeated_entity_rows": sig.repeated_entity_rows,
             "explanation": (
                 f"Found {sig.duplicate_rows} feature-duplicate rows, "
-                f"of which {sig.conflicting_duplicates} carry conflicting labels. "
-                "Conflicting duplicates are a strong indicator of train/test contamination."
+                f"of which {sig.conflicting_duplicates} groups carry conflicting labels; "
+                f"{sig.repeated_entities} repeated entities cover "
+                f"{sig.repeated_entity_rows} rows. These patterns create contamination "
+                "risk when a row-wise split places matching records/entities in both sets."
             ),
         },
         interpretation=(
-            "contamination_present" if sig.conflicting_duplicates > 0 else "no_contamination"
+            "conflicting_duplicate_records" if sig.conflicting_duplicates > 0
+            else "duplicate_overlap_risk" if sig.duplicate_rows > 0
+            else "entity_overlap_risk" if sig.repeated_entities > 0
+            else "no_contamination_signal"
         ),
     )
 
@@ -178,6 +198,7 @@ def _run_temporal_split(
         evidence={
             "random_auc": rand["roc_auc"],
             "chronological_auc": chrono["roc_auc"],
+            "gap_auc": gap,
             "explanation": (
                 f"Random-split AUC={rand['roc_auc']:.3f} vs chronological-split "
                 f"AUC={chrono['roc_auc']:.3f}. If random splits outperform chronological "
@@ -194,9 +215,14 @@ def _run_availability(
     df: pd.DataFrame, target: str, params: dict[str, Any], seed: int
 ) -> ExperimentResult:
     feat = params["feature"]
-    other = [c for c in df.columns if c not in (target, params.get("timestamp_column"), params.get("entity_column"))]
+    if feat not in df.columns:
+        raise ValueError(f"Feature {feat!r} is missing from the dataset.")
+    other = [
+        c for c in df.columns
+        if c not in (target, feat, params.get("timestamp_column"), params.get("entity_column"))
+    ]
     with_feat = cross_val_auc(df, other + [feat], target, seed=seed)["cv_auc_mean"]
-    without_feat = cross_val_auc(df, other, target, seed=seed)["cv_auc_mean"]
+    without_feat = cross_val_auc(df, other, target, seed=seed)["cv_auc_mean"] if other else 0.5
     return ExperimentResult(
         experiment_id=params.get("experiment_id", ""),
         hypothesis_id=params.get("hypothesis_id", ""),

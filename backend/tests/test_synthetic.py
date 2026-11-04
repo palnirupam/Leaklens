@@ -1,4 +1,5 @@
 from app.data.synthetic import LEAK_CATEGORIES, generate_case
+from app.core.models import LEAKAGE_CATEGORIES
 
 
 def test_clean_has_no_leak():
@@ -30,3 +31,9 @@ def test_all_categories_generate():
     for cat in LEAK_CATEGORIES:
         c = generate_case(cat, seed=4)
         assert c.df.shape[0] > 100
+
+
+def test_public_category_names_match_runtime_categories():
+    assert "prediction_time_unavailable" in LEAKAGE_CATEGORIES
+    assert "duplicate_contamination" in LEAKAGE_CATEGORIES
+    assert "evaluation_protocol_risk" in LEAKAGE_CATEGORIES

@@ -52,7 +52,8 @@ class GeminiClient:
     def _load_cache(self) -> None:
         try:
             if self._cache_file.exists():
-                self.cache = json.loads(self._cache_file.read_text(encoding="utf-8"))
+                cached = json.loads(self._cache_file.read_text(encoding="utf-8"))
+                self.cache = cached if isinstance(cached, dict) else {}
         except Exception:  # noqa: BLE001
             self.cache = {}
 
@@ -70,14 +71,21 @@ class GeminiClient:
         max_retries: int | None = None,
     ) -> Optional[dict[str, Any]]:
         """Return a parsed JSON dict or None on any failure."""
+        self._error = None
         if not self.is_configured:
             self._error = "GEMINI_API_KEY not set"
             return None
 
-        key = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+        key = hashlib.sha256(json.dumps([self.model, schema, prompt], sort_keys=True).encode("utf-8")).hexdigest()
         if settings.gemini_cache and key in self.cache:
-            cached = self.cache[key]
-            return json.loads(cached) if isinstance(cached, str) else cached
+            try:
+                cached = self.cache[key]
+                parsed = json.loads(cached) if isinstance(cached, str) else cached
+                if isinstance(parsed, dict):
+                    return parsed
+            except (TypeError, ValueError):
+                pass
+            self.cache.pop(key, None)
 
         client = self._ensure_client()
         if client is None:
@@ -95,9 +103,12 @@ class GeminiClient:
                 )
                 text = resp.text
                 parsed = json.loads(text)
+                if not isinstance(parsed, dict):
+                    raise ValueError("Gemini response must be a JSON object.")
                 if settings.gemini_cache:
                     self.cache[key] = text
                     self._persist_cache()
+                self._error = None
                 return parsed
             except Exception as exc:  # noqa: BLE001
                 self._error = str(exc)
@@ -133,6 +144,8 @@ class GeminiClient:
             "duplicate_rows": signals.duplicate_rows,
             "conflicting_duplicates": signals.conflicting_duplicates,
             "entity_conflicts": signals.entity_conflicts,
+            "repeated_entities": signals.repeated_entities,
+            "repeated_entity_rows": signals.repeated_entity_rows,
             "high_association_features": [
                 {"feature": f, "association": round(a, 3)} for f, a in signals.high_association_features
             ],

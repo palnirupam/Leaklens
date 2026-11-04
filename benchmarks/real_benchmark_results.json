@@ -1,45 +1,39 @@
 {
   "datasets": [
     "bank",
-    "bank_duplicate",
-    "bank_temporal",
     "breast",
-    "breast_prediction_time",
-    "breast_target_derived",
-    "wine",
-    "wine_duplicate",
-    "wine_target_derived"
+    "wine"
   ],
   "n_cases": 9,
   "rule_based_baseline": {
     "n_cases": 9,
-    "true_pos": 7,
+    "true_pos": 6,
     "false_pos": 4,
-    "false_neg": 0,
-    "precision": 0.636,
-    "recall": 1.0,
-    "f1": 0.778,
+    "false_neg": 1,
+    "precision": 0.6,
+    "recall": 0.857,
+    "f1": 0.706,
     "false_positive_rate_clean": 0.667,
     "root_cause_accuracy": 0.857,
     "mean_experiments": 0.0,
-    "mean_seconds": 1.71,
-    "total_seconds": 15.4
+    "mean_seconds": 2.87,
+    "total_seconds": 25.8
   },
   "leaklens_adaptive": {
     "n_cases": 9,
-    "true_pos": 5,
+    "true_pos": 4,
     "false_pos": 0,
-    "false_neg": 2,
+    "false_neg": 3,
     "precision": 1.0,
-    "recall": 0.714,
-    "f1": 0.833,
+    "recall": 0.571,
+    "f1": 0.727,
     "false_positive_rate_clean": 0.0,
-    "root_cause_accuracy": 1.0,
-    "mean_experiments": 8.56,
-    "mean_seconds": 22.35,
-    "total_seconds": 201.1
+    "root_cause_accuracy": 0.571,
+    "mean_experiments": 8.44,
+    "mean_seconds": 51.93,
+    "total_seconds": 467.3
   },
-  "run_all_experiments_mean": 15.33,
+  "run_all_experiments_mean": 17.56,
   "per_case": [
     {
       "case": "wine_clean",
@@ -102,10 +96,9 @@
         "temporal_leakage"
       ],
       "predicted": [
-        "target_derived_feature",
-        "temporal_leakage"
+        "target_derived_feature"
       ],
-      "verdict": "OK"
+      "verdict": "PART"
     },
     {
       "case": "bank_duplicate_contamination",
@@ -118,5 +111,5 @@
       "verdict": "OK"
     }
   ],
-  "note": "Real data from sklearn (Wine, Breast Cancer) + UCI Bank Marketing; each case has one documented leakage injection. Adaptive confirms leaks with budget-aware experiments while keeping the experiment count below the run-all bound."
+  "note": "Real data from sklearn (Wine, Breast Cancer) + UCI Bank Marketing; each non-clean case has one documented leakage injection. Metrics count all reported findings, including review flags. Experiment counts exclude profiling and signal calculations."
 }

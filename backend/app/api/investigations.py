@@ -1,6 +1,7 @@
 """Investigation API endpoints."""
 from __future__ import annotations
 
+import io
 import json
 import threading
 import uuid
@@ -32,13 +33,18 @@ _orchestrator.on_progress = _store.save
 # helpers
 # ---------------------------------------------------------------------------
 
-def _load_df(path: Path) -> pd.DataFrame:
+def _load_df(content: bytes) -> pd.DataFrame:
     try:
-        df = pd.read_csv(path)
+        df = pd.read_csv(io.BytesIO(content))
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=f"Could not read CSV: {exc!r}") from exc
     if df.empty:
         raise HTTPException(status_code=400, detail="CSV is empty.")
+    if len(df) > settings.max_csv_rows:
+        raise HTTPException(
+            status_code=413,
+            detail=f"CSV has too many rows (maximum {settings.max_csv_rows:,}).",
+        )
     return df
 
 
@@ -46,6 +52,47 @@ def _validate_target(df: pd.DataFrame, target: str) -> None:
     if target not in df.columns:
         raise HTTPException(
             status_code=400, detail=f"Target column '{target}' not found in CSV."
+        )
+    if df[target].isna().any():
+        raise HTTPException(status_code=400, detail="Target column contains missing values.")
+    if df[target].nunique(dropna=True) < 2:
+        raise HTTPException(
+            status_code=400, detail="Target column must contain at least two classes."
+        )
+
+
+def _validate_config_columns(
+    df: pd.DataFrame,
+    target: str,
+    timestamp_column: Optional[str],
+    entity_column: Optional[str],
+    unavailable: list[str],
+) -> None:
+    configured = {
+        "timestamp": timestamp_column,
+        "entity": entity_column,
+    }
+    for label, column in configured.items():
+        if column and column not in df.columns:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Configured {label} column '{column}' not found in CSV.",
+            )
+        if column and column == target:
+            raise HTTPException(
+                status_code=400,
+                detail=f"The target column cannot also be the {label} column.",
+            )
+    missing = [column for column in unavailable if column not in df.columns]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unavailable-at-prediction columns not found: {', '.join(missing)}.",
+        )
+    if target in unavailable:
+        raise HTTPException(
+            status_code=400,
+            detail="The target column cannot be listed as unavailable at prediction time.",
         )
 
 
@@ -104,6 +151,26 @@ async def create_investigation(
     if len(content) > max_bytes:
         raise HTTPException(status_code=413, detail="File too large.")
 
+    df = _load_df(content)
+    _validate_target(df, target_column)
+
+    unavailable = list(dict.fromkeys(_parse_list(unavailable_at_prediction)))
+    timestamp_column = timestamp_column or None
+    entity_column = entity_column or None
+    _validate_config_columns(
+        df,
+        target_column,
+        timestamp_column,
+        entity_column,
+        unavailable,
+    )
+
+    script_content: Optional[bytes] = None
+    if script is not None and script.filename:
+        script_content = await script.read()
+        if len(script_content) > 512 * 1024:
+            raise HTTPException(status_code=413, detail="Script file too large.")
+
     inv_id = f"inv_{uuid.uuid4().hex[:12]}"
     inv_dir = settings.uploads_dir / inv_id
     inv_dir.mkdir(parents=True, exist_ok=True)
@@ -112,30 +179,24 @@ async def create_investigation(
     ds_path = inv_dir / "dataset.csv"
     ds_path.write_bytes(content)
 
-    df = _load_df(ds_path)
-    _validate_target(df, target_column)
-
     script_path: Optional[Path] = None
-    if script is not None and script.filename:
-        s_content = await script.read()
-        if len(s_content) > 512 * 1024:
-            raise HTTPException(status_code=413, detail="Script file too large.")
+    if script_content is not None:
         script_path = inv_dir / "training_script.py"
-        script_path.write_bytes(s_content)
+        script_path.write_bytes(script_content)
 
     cfg = InvestigationConfig(
         dataset_path=str(ds_path),
         target_column=target_column,
-        timestamp_column=timestamp_column or None,
-        entity_column=entity_column or None,
+        timestamp_column=timestamp_column,
+        entity_column=entity_column,
         script_path=str(script_path) if script_path else None,
-        unavailable_at_prediction=_parse_list(unavailable_at_prediction),
+        unavailable_at_prediction=unavailable,
         gemini_enabled=gemini_enabled,
         random_seed=random_seed,
         source_filename=src_name,
     )
 
-    inv = _orchestrator.create(cfg)
+    inv = _orchestrator.create(cfg, investigation_id=inv_id)
     _store.save(inv)
 
     def _run() -> None:

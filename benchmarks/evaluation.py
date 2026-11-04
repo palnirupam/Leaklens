@@ -14,10 +14,15 @@ from __future__ import annotations
 import tempfile
 import os
 import time
-from typing import Callable, Optional
+from typing import Callable
 
-from app.data.synthetic import SyntheticCase, generate_benchmark_cases
+from app.data.synthetic import SyntheticCase
+from app.agents.experiment_executor import _candidate_experiments
+from app.agents.hypothesis_planner import HypothesisPlanner
 from app.core.models import Investigation, InvestigationConfig
+from app.detectors.dataset_investigator import investigate
+from app.detectors.leakage_detectors import detect_signals
+from app.services.gemini_client import GeminiClient
 from app.services.orchestrator import InvestigationOrchestrator
 
 GROUND_TRUTH: dict[str, set[str]] = {
@@ -51,9 +56,6 @@ def run_leaklens_case(case: SyntheticCase, seed: int = 42) -> Investigation:
 
 def baseline_findings(case: SyntheticCase) -> list[tuple[str, list[str]]]:
     """Pure signal-level baseline: every detected signal becomes a finding."""
-    from app.detectors.dataset_investigator import investigate
-    from app.detectors.leakage_detectors import detect_signals
-
     prof = investigate(case.df, case.target)
     sig = detect_signals(
         case.df, prof, case.target,
@@ -64,12 +66,14 @@ def baseline_findings(case: SyntheticCase) -> list[tuple[str, list[str]]]:
     out: list[tuple[str, list[str]]] = []
     for feat, _ in sig.high_association_features:
         out.append(("target_derived_feature", [feat]))
-    if sig.conflicting_duplicates > 0:
-        out.append(("duplicate_contamination", []))
-    if sig.temporal is not None:
+    if sig.duplicate_rows > 0 or sig.repeated_entities > 0:
+        out.append(("duplicate_contamination", [case.entity_column] if case.entity_column else []))
+    if sig.temporal and not sig.temporal.get("error") and sig.temporal.get("gap_auc", 0.0) > 0.10:
         out.append(("temporal_leakage", []))
     for feat in sig.prediction_time_unavailable:
         out.append(("prediction_time_unavailable", [feat]))
+    for first, second, _, _ in sig.interaction_features:
+        out.append(("feature_interaction_leakage", [first, second]))
     return out
 
 
@@ -105,16 +109,17 @@ def score_approach(
         false_pos += fp
         false_neg += fn
 
-        # root-cause accuracy: affected features should include injected leak features
-        cat_map = {c: a for c, a in findings}
+        # Root-cause accuracy includes missed categories in the denominator.
+        # Multiple findings in one category contribute the union of features.
+        cat_map: dict[str, set[str]] = {}
+        for category, affected in findings:
+            cat_map.setdefault(category, set()).update(affected)
         for gcat in gt:
+            root_cause_total += 1
             if gcat in cat_map:
-                root_cause_total += 1
-                affected = set(cat_map[gcat])
+                affected = cat_map[gcat]
                 leaked = set(case.leaked_features)
                 if (case.category in ("duplicate_contamination",)) or (not leaked) or (affected & leaked):
-                    root_cause_hits += 1
-                elif gcat == "target_derived_feature" and affected & leaked:
                     root_cause_hits += 1
 
         total_experiments += n_exp
@@ -145,7 +150,7 @@ def baseline_predict(case: SyntheticCase) -> tuple[list[tuple[str, list[str]]], 
     return findings, 0, time.perf_counter() - t0
 
 
-def leakaklens_predict(seed: int = 42):
+def leaklens_predict(seed: int = 42):
     def _f(case: SyntheticCase) -> tuple[list[tuple[str, list[str]]], int, float]:
         t0 = time.perf_counter()
         inv = run_leaklens_case(case, seed=seed)
@@ -154,19 +159,42 @@ def leakaklens_predict(seed: int = 42):
     return _f
 
 
+# Compatibility for older imports; remove after downstream users migrate.
+leakaklens_predict = leaklens_predict
+
+
 def all_experiments_count(case: SyntheticCase) -> int:
     """Upper bound: number of candidate experiments if we ran every possible check."""
-    n = 0
-    from app.detectors.dataset_investigator import investigate
-    from app.detectors.leakage_detectors import detect_signals
     prof = investigate(case.df, case.target)
     sig = detect_signals(case.df, prof, case.target, timestamp_column=case.timestamp_column,
                          entity_column=case.entity_column,
                          unavailable_at_prediction=case.unavailable_at_prediction)
-    n += len(sig.high_association_features) * 2  # ablation + permutation per feature
-    if sig.conflicting_duplicates > 0:
-        n += 1
-    if sig.temporal is not None:
-        n += 1 + len(sig.high_association_features)
-    n += len(sig.prediction_time_unavailable)
-    return max(1, n)
+    hypotheses, _ = HypothesisPlanner().plan("benchmark", prof, sig, [])
+    return sum(len(_candidate_experiments(h)) for h in hypotheses)
+
+
+def score_gemini(cases: list[SyntheticCase]) -> dict:
+    """Score Gemini hypotheses from the same metadata/signals, without adaptive experiments."""
+    client = GeminiClient()
+    if not client.is_configured:
+        return {"status": "skipped (no GEMINI_API_KEY configured)"}
+    planner = HypothesisPlanner(client)
+
+    def predict(case):
+        started = time.perf_counter()
+        profile = investigate(case.df, case.target)
+        signals = detect_signals(
+            case.df, profile, case.target,
+            timestamp_column=case.timestamp_column,
+            entity_column=case.entity_column,
+            unavailable_at_prediction=case.unavailable_at_prediction,
+        )
+        suggestions = planner._gemini_suggest("benchmark", profile, signals)
+        if suggestions is None:
+            raise RuntimeError(f"Gemini returned no valid response for {case.name}.")
+        return [(h.category, h.affected_features) for h in suggestions], 0, time.perf_counter() - started
+
+    try:
+        return {"status": "completed", **score_approach(cases, predict)}
+    except RuntimeError as exc:
+        return {"status": "failed", "error": str(exc)}

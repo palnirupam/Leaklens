@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
@@ -21,8 +20,9 @@ from app.data.synthetic import generate_benchmark_cases
 from benchmarks.evaluation import (
     all_experiments_count,
     baseline_predict,
-    leakaklens_predict,
+    leaklens_predict,
     score_approach,
+    score_gemini,
 )
 
 PER_CATEGORY = 6
@@ -36,7 +36,7 @@ def main() -> int:
           f"({PER_CATEGORY} per category across 5 categories)\n")
 
     baseline = score_approach(cases, baseline_predict)
-    adaptive = score_approach(cases, leakaklens_predict(seed=42))
+    adaptive = score_approach(cases, leaklens_predict(seed=42))
     upper_bound_mean = sum(all_experiments_count(c) for c in cases) / len(cases)
 
     print("=" * 70)
@@ -49,23 +49,18 @@ def main() -> int:
     print(f"{'runtime-experiments upper bound':28s} {upper_bound_mean:>12.2f}")
     print("=" * 70)
 
-    # Gemini-only: require a live key.
-    gemini_status = "skipped (no GEMINI_API_KEY configured)"
-    from app.core.config import settings
-    if settings.gemini_api_key:
-        gemini_status = "configured (run with a key to populate)"
-
     results = {
         "per_category": PER_CATEGORY,
         "n_cases": len(cases),
         "rule_based_baseline": baseline,
         "leaklens_adaptive": adaptive,
         "run_all_experiments_mean": upper_bound_mean,
-        "gemini_only": {"status": gemini_status},
+        "gemini_only": score_gemini(cases),
         "note": (
             "LeakLens adaptive uses the same signals as the rule-based baseline but "
-            "confirms them with budget-aware experiments and can still reach comparable "
-            "recall while keeping the experiment count small."
+            "investigates them with budget-aware experiments. Metrics count all reported "
+            "findings, including review flags; they do not measure confirmed leakage alone. "
+            "Experiment counts exclude profiling and signal calculations."
         ),
     }
     OUT.write_text(json.dumps(results, indent=2), encoding="utf-8")

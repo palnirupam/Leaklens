@@ -46,9 +46,13 @@ class InvestigationOrchestrator:
             except Exception:  # noqa: BLE001
                 pass
 
-    def create(self, config: InvestigationConfig) -> Investigation:
+    def create(
+        self,
+        config: InvestigationConfig,
+        investigation_id: Optional[str] = None,
+    ) -> Investigation:
         return Investigation(
-            id=f"inv_{uuid.uuid4().hex[:12]}",
+            id=investigation_id or f"inv_{uuid.uuid4().hex[:12]}",
             config=config,
             status="queued",
             created_at=_utcnow(),

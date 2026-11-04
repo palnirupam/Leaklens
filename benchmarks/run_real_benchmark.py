@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 import warnings
 from pathlib import Path
 
@@ -26,7 +27,6 @@ from benchmarks.evaluation import (
     all_experiments_count,
     baseline_predict,
     GROUND_TRUTH,
-    leakaklens_predict,
     run_leaklens_case,
     score_approach,
 )
@@ -38,7 +38,7 @@ def main() -> int:
     cases = build_real_cases()
 
     print(f"Real-dataset benchmark: {len(cases)} cases across "
-          f"{len({c.name.rsplit('_',1)[0] for c in cases})} real datasets\n")
+          f"{len({c.name.split('_',1)[0] for c in cases})} real datasets\n")
     rows = []
     for c in cases:
         rows.append(
@@ -52,17 +52,21 @@ def main() -> int:
     # Per-case adaptive verdict (transparency: what LeakLens reported vs truth).
     print("Per-case LeakLens adaptive results:")
     per_case = []
-    for c in cases:
+    def adaptive_predict(c):
+        started = time.perf_counter()
         inv = run_leaklens_case(c, seed=42)
+        seconds = time.perf_counter() - started
         pred_cats = sorted({f.category for f in inv.findings})
         truth = sorted(GROUND_TRUTH.get(c.category, set()))
         hit = "OK" if set(pred_cats) == set(truth) else "PART" if set(pred_cats) & set(truth) else "MISS"
         print(f"  {c.name:<42s} truth={truth!s:<52s} predicted={pred_cats!s:<52s} {hit}")
         per_case.append({"case": c.name, "truth": truth, "predicted": pred_cats, "verdict": hit})
+        return [(f.category, f.affected_features) for f in inv.findings], len(inv.results), seconds
+
+    adaptive = score_approach(cases, adaptive_predict)
     print()
 
     baseline = score_approach(cases, baseline_predict)
-    adaptive = score_approach(cases, leakaklens_predict(seed=42))
     upper_bound_mean = sum(all_experiments_count(c) for c in cases) / len(cases)
 
     print("=" * 70)
@@ -76,7 +80,7 @@ def main() -> int:
     print("=" * 70)
 
     results = {
-        "datasets": sorted({c.name.rsplit('_', 1)[0] for c in cases}),
+        "datasets": sorted({c.name.split("_", 1)[0] for c in cases}),
         "n_cases": len(cases),
         "rule_based_baseline": baseline,
         "leaklens_adaptive": adaptive,
@@ -84,9 +88,9 @@ def main() -> int:
         "per_case": per_case,
         "note": (
             "Real data from sklearn (Wine, Breast Cancer) + UCI Bank Marketing; "
-            "each case has one documented leakage injection. Adaptive confirms leaks "
-            "with budget-aware experiments while keeping the experiment count below "
-            "the run-all bound."
+            "each non-clean case has one documented leakage injection. Metrics count "
+            "all reported findings, including review flags. Experiment counts exclude "
+            "profiling and signal calculations."
         ),
     }
     OUT.write_text(json.dumps(results, indent=2), encoding="utf-8")

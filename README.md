@@ -84,7 +84,7 @@ It *deliberately* distinguishes between:
 | **Leakage Detectors** | Target-derived features, duplicate/entity contamination (feature-level, conflict-aware), temporal random-vs-chronological comparison, prediction-time availability |
 | **Hypothesis Planner** | Builds structured candidate hypotheses from signals; optional Gemini enrichment (validated, offline fallback) |
 | **Adaptive Experiment Executor** | Deterministic, budget-aware selection: `score = evidence × diagnostic_value / (1 + cost)`; updates hypothesis confidence as experiments run |
-| **Experiments** | Feature ablation, shuffled-target permutation test, duplicate/conflict check, temporal split comparison, availability check, static review |
+| **Experiments** | Feature ablation, feature permutation test, duplicate/conflict check, temporal split comparison, availability check, static review |
 | **Evidence Verification** | Only experimental/static evidence becomes a finding; unsupported Gemini claims are rejected; corrections attached |
 | **Gemini Integration** | Official `google-genai` SDK, structured JSON, retries + rate-limit backoff, caching, never sends raw datasets by default, works without a key |
 | **REST API** | Upload CSV + script, background investigation, live status polling, findings, JSON/HTML reports, dashboard stats |
@@ -128,7 +128,7 @@ score(experiment) = evidence_strength(hypothesis) × diagnostic_value(experiment
                                1 + normalized_cost(experiment)
 ```
 
-tie-broken by experiment id so identical inputs always produce identical runs
+tie-broken by hypothesis and action order so identical inputs produce the same experiment decisions
 (fully reproducible).
 
 ---
@@ -149,7 +149,7 @@ LeakLens/
 │   │   ├── services/       Gemini client, orchestrator (agentic state machine)
 │   │   ├── data/           synthetic dataset generator (fallback + benchmark)
 │   │   └── main.py         FastAPI app entry-point
-│   ├── tests/              pytest suite (23 tests)
+│   ├── tests/              pytest unit and regression suite
 │   ├── .env.example
 │   └── requirements.txt
 ├── frontend/               Vite + React + TypeScript SPA
@@ -344,8 +344,11 @@ python training\train_baseline.py --include-duration    # comparison only
 ## ✅ Running Tests & Benchmark
 
 ```powershell
-# Unit tests (23 tests)
+# Unit and regression tests
 python -m pytest backend\tests -q
+
+# Frontend type checks and production build
+npm --prefix frontend run build
 
 # Research benchmark (30 synthetic cases across 5 categories)
 python -m benchmarks.run_benchmark
@@ -354,20 +357,25 @@ python -m benchmarks.run_benchmark
 python -m benchmarks.make_chart
 ```
 
-### Current benchmark results (30 cases, 6 per category)
+The browser regression check is [scripts/check_frontend.js](scripts/check_frontend.js).
+With the dev servers running and matching nonempty `API_KEY` / `VITE_API_KEY`,
+load it through Playwright's `browser_run_code_unsafe` using the `filename`
+argument. It creates a synthetic investigation and checks upload retention,
+typing focus, authenticated JSON/HTML downloads, keyboard preview, and retry
+after a failed download. Use temporary `STORAGE_DIR` storage for this check.
 
-| Metric | Rule-based baseline | LeakLens adaptive |
-|--------|--------------------:|------------------:|
-| Precision | 1.000 | 1.000 |
-| Recall | 1.000 | 1.000 |
-| F1 | 1.000 | 1.000 |
-| False-positive rate (clean) | 0.000 | 0.000 |
-| Root-cause accuracy | 0.800 | **1.000** |
-| Mean experiments / case | 0.0 | 1.6 (run-all bound ≈ 1.8) |
-| Mean seconds / case | 0.01 | 0.06 |
+### Recorded benchmark results (30 cases, 6 per category)
 
-All numbers are produced by actually executing the code on generated data with
-known ground truth — they are real, reproducible results, not estimates.
+See [benchmark_results.json](benchmarks/benchmark_results.json) for the latest
+recorded metrics and [benchmark_chart.svg](benchmarks/benchmark_chart.svg) for
+the comparison chart. Regenerate both after changing detection or evaluation.
+
+Precision, recall and F1 count reported categories, including potential and
+suspicious review flags. They do not measure confirmed leakage alone.
+Root-cause accuracy includes missed categories in its denominator.
+Experiment counts cover registered adaptive experiments and exclude profiling
+and signal calculations; the run-all bound uses the executor's actual candidate
+list. Runtimes depend on the machine and workload.
 
 ### Real-dataset benchmark
 
@@ -379,25 +387,15 @@ injection per case:
 python -m benchmarks.run_real_benchmark
 ```
 
-| Metric | Rule-based baseline | LeakLens adaptive |
-|--------|--------------------:|------------------:|
-| Precision | 0.636 | **1.000** |
-| Recall | 1.000 | 0.714 |
-| F1 | 0.778 | **0.833** |
-| False-positive rate (clean) | 0.667 | **0.000** |
-| Root-cause accuracy | 0.857 | **1.000** |
-| Mean experiments / case | 0.0 | 8.56 (run-all ≈ 15.33) |
+See [real_benchmark_results.json](benchmarks/real_benchmark_results.json) for
+recorded metrics and each case's expected and reported categories. The Wine
+duplicate case preserves the original three target classes. Each adaptive case
+runs once, and the same findings feed both its verdict and the aggregate scores.
 
-On messy real data the baseline over-alerts (2 of 3 clean cases falsely
-flagged), while LeakLens stays **zero-false-positive on clean data**, keeps
-100% root-cause accuracy, and uses far fewer experiments than the run-all bound
-— the budget-aware adaptive selection holds in practice.
-
-> **Honest limitation (reproducible):** the target-derived confirmation requires
-> dropping the feature to reduce whole-model AUC by >10%. On feature-rich real
-> datasets a weak leak hidden behind many correlated features may therefore be
-> conservatively missed (a precision-first trade-off). This behavior is explicit
-> in the code and not hidden.
+Target-derived findings require an ablation or permutation AUC drop above 0.10;
+correlated valid predictors can hide an injected leak. Temporal split comparison
+can also miss a precomputed future-derived feature that remains predictive in
+both splits. These missed categories remain in the benchmark's false negatives.
 
 ---
 
@@ -406,9 +404,10 @@ flagged), while LeakLens stays **zero-false-positive on clean data**, keeps
 **Budget-aware adaptive leakage investigation.** LeakLens does not run every
 check in a fixed order. It scores candidate experiments with a deterministic,
 explainable priority formula and stops once hypothesis confidence is established.
-In the benchmark this achieves the same precision/recall as the signal-level
-baseline **while improving root-cause accuracy** (0.8 → 1.0) and staying below
-the "run-all-experiments" upper bound in mean experiment count.
+Tests check reproducible experiment decisions, unique experiment IDs, evidence
+verification and a bounded experiment budget. The recorded benchmark results
+show its measured performance relative to the signal-level baseline; an
+accuracy or efficiency improvement must be established by those results.
 
 **Red-team hardening (2026).** Two adversarial reviews exposed and led to
 fixes:
@@ -421,11 +420,14 @@ fixes:
 - *Stealth XOR interaction* — a 100%-informative pairwise interaction with zero
   individual-feature signal was invisible. Fixed with a shallow-tree pairwise
   interaction scan that surfaces such cases as review flags (never confirmed).
-  Regression tests in `backend/tests/test_redteam_fixes.py` cover both; both
-  benchmarks are unchanged.
+  Regression tests in `backend/tests/test_redteam_fixes.py` cover both.
 
-Gemini-only analysis is wired into the harness but is reported as **skipped**
-unless a valid key is configured — we never fabricate its results.
+The synthetic harness runs Gemini hypothesis evaluation when `GEMINI_API_KEY`
+is configured, using the same sanitized metadata and computed signals without
+adaptive verification. It records metrics only after every response passes
+validation. Missing credentials produce **skipped**; unavailable or invalid
+responses produce **failed** without fabricated scores. Offline tests exercise
+this path with a fake provider; a live run requires a working Gemini key.
 
 ---
 

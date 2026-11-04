@@ -50,14 +50,30 @@ def _cramers_v(x: pd.Series, y: pd.Series) -> float:
 
 def _target_association(col: pd.Series, target: pd.Series) -> float:
     if col.dtype.kind in "iufc":
-        # numeric vs binary target -> |point-biserial| ~ |pearson r|
-        t = target.astype(float)
-        c = col.astype(float)
-        mask = t.notna() & c.notna()
+        # Binary target -> point-biserial correlation.  Multiclass target ->
+        # correlation ratio (eta), which is invariant to arbitrary class labels.
+        c = pd.to_numeric(col, errors="coerce")
+        mask = target.notna() & c.notna()
         if mask.sum() < 10 or c[mask].nunique() < 2:
             return 0.0
-        r = np.corrcoef(c[mask], t[mask])[0, 1]
-        return float(abs(r)) if not np.isnan(r) else 0.0
+        values = c[mask].astype(float)
+        labels, classes = pd.factorize(target[mask].astype(str), sort=True)
+        if len(classes) < 2:
+            return 0.0
+        if len(classes) == 2:
+            r = np.corrcoef(values.to_numpy(), labels)[0, 1]
+            return float(abs(r)) if not np.isnan(r) else 0.0
+
+        grand_mean = float(values.mean())
+        total = float(((values - grand_mean) ** 2).sum())
+        if total <= 0:
+            return 0.0
+        between = 0.0
+        for code in range(len(classes)):
+            group = values[labels == code]
+            if len(group):
+                between += len(group) * (float(group.mean()) - grand_mean) ** 2
+        return float(min(1.0, np.sqrt(max(0.0, between / total))))
     # categorical vs target -> Cramer's V
     return _cramers_v(col, target)
 
@@ -79,10 +95,19 @@ def investigate(
     )
 
     target = df[target_column]
-    profile.target_is_binary = target.nunique() <= 2
+    target_classes = int(target.nunique(dropna=True))
+    profile.target_is_binary = target_classes == 2
     profile.target_class_balance = {
         str(k): float(v) for k, v in target.value_counts(normalize=True).head(20).items()
     }
+    if target.isna().any():
+        profile.warnings.append("Target column contains missing values.")
+    if target_classes < 2:
+        profile.warnings.append("Target column has fewer than two classes.")
+    elif target_classes > 20:
+        profile.warnings.append(
+            f"Target has {target_classes} classes; LeakLens is intended for classification."
+        )
 
     for colname in df.columns:
         col = df[colname]

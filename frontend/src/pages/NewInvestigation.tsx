@@ -1,6 +1,16 @@
 import { FormEvent, ReactNode, useRef, useState } from "react";
 import { api } from "../api";
 
+function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+  return (
+    <label className="field">
+      <span className="field-label">{label}</span>
+      {children}
+      {hint && <span className="field-hint">{hint}</span>}
+    </label>
+  );
+}
+
 export default function NewInvestigation({
   onStarted,
 }: {
@@ -53,16 +63,6 @@ export default function NewInvestigation({
     } finally {
       setBusy(false);
     }
-  }
-
-  function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
-    return (
-      <label className="field">
-        <span className="field-label">{label}</span>
-        {children}
-        {hint && <span className="field-hint">{hint}</span>}
-      </label>
-    );
   }
 
   return (

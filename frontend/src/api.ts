@@ -120,8 +120,27 @@ export const api = {
   getInvestigation: (id: string) => getJSON<Investigation>(`/api/investigations/${id}`),
   detail: (id: string) => getJSON<InvestigationDetail>(`/api/investigations/${id}/detail`),
   findings: (id: string) => getJSON<Finding[]>(`/api/investigations/${id}/findings`),
-  reportUrl: (id: string, format: "json" | "html") =>
-    `/api/investigations/${id}/report?format=${format}`,
+  downloadReport: async (id: string, format: "json" | "html"): Promise<void> => {
+    const res = await fetch(`/api/investigations/${id}/report?format=${format}`, {
+      headers: authHeaders(),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`HTTP ${res.status}: ${body}`);
+    }
+    const url = URL.createObjectURL(await res.blob());
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `investigation_${id}.${format}`;
+    document.body.appendChild(link);
+    try {
+      link.click();
+    } finally {
+      link.remove();
+      // Let the browser start the download before releasing its data.
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+    }
+  },
   createInvestigation: async (form: FormData): Promise<Investigation> => {
     const res = await fetch("/api/investigations", {
       method: "POST",

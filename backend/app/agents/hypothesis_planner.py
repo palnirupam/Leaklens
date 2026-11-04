@@ -19,6 +19,7 @@ CATEGORY_LABELS = {
     "prediction_time_unavailable": "Feature unavailable at prediction time",
     "duplicate_contamination": "Train/test contamination via duplicates",
     "preprocessing_leakage": "Preprocessing fitted before split (static)",
+    "evaluation_protocol_risk": "Missing or unsafe validation split (static)",
     "temporal_leakage": "Temporal leakage / future information",
     "feature_interaction_leakage": "Strong joint signal with weak individual signals",
 }
@@ -48,6 +49,7 @@ def _make_hypothesis(
         affected_features=affected,
         code_paths=code_paths or [],
         source=source,
+        confidence=0.3 if source == "rule" else 0.2,
     )
 
 
@@ -96,7 +98,7 @@ class HypothesisPlanner:
                         "Rows sharing all feature values but differing in the target indicate "
                         "train/test contamination or data-entry conflicts; can inflate apparent accuracy."
                     ),
-                    affected=[],
+                    affected=[signals.entity_column] if signals.entity_column else [],
                 )
             )
         elif signals.duplicate_rows > 0:
@@ -107,13 +109,31 @@ class HypothesisPlanner:
                     "Duplicate observations present",
                     f"{signals.duplicate_rows} feature-duplicate rows found.",
                     "Exact duplicates can cause leakage when split across train/test.",
-                    affected=[],
+                    affected=[signals.entity_column] if signals.entity_column else [],
+                )
+            )
+        elif signals.repeated_entities > 0 and signals.entity_column:
+            hypotheses.append(
+                _make_hypothesis(
+                    investigation_id,
+                    "duplicate_contamination",
+                    f"Entity `{signals.entity_column}` repeats across rows",
+                    (
+                        f"{signals.repeated_entities} entities occur more than once, covering "
+                        f"{signals.repeated_entity_rows} rows."
+                    ),
+                    (
+                        "A row-wise train/test split can place the same entity in both sets. "
+                        "Use a group-aware split and compare metrics before treating this as "
+                        "confirmed contamination."
+                    ),
+                    affected=[signals.entity_column],
                 )
             )
 
         # 3) temporal leakage
-        if signals.temporal:
-            feat = signals.high_association_features[0][0] if signals.high_association_features else ""
+        if signals.temporal and not signals.temporal.get("error"):
+            candidates = [f for f, _ in signals.high_association_features]
             hypotheses.append(
                 _make_hypothesis(
                     investigation_id,
@@ -124,7 +144,7 @@ class HypothesisPlanner:
                         "When data are time-ordered, splitting randomly can place future rows in "
                         "training. Chronological splits prevent this."
                     ),
-                    affected=[feat] if feat else [],
+                    affected=candidates,
                 )
             )
 
@@ -162,14 +182,17 @@ class HypothesisPlanner:
             )
 
         # 5) static preprocessing patterns
-        if code_findings:
-            paths = [f"line {f.line}" for f in code_findings]
+        preprocessing_findings = [
+            f for f in code_findings if f.pattern == "preprocessing_before_split"
+        ]
+        if preprocessing_findings:
+            paths = [f"line {f.line}" for f in preprocessing_findings]
             hypotheses.append(
                 _make_hypothesis(
                     investigation_id,
                     "preprocessing_leakage",
                     "Training script shows suspected preprocessing-before-split patterns",
-                    f"{len(code_findings)} suspicious static patterns found.",
+                    f"{len(preprocessing_findings)} suspicious static patterns found.",
                     (
                         "Fitting scalers/imputers/oversampling on the whole dataset before "
                         "splitting can leak training information into validation. Static only; "
@@ -180,17 +203,30 @@ class HypothesisPlanner:
                 )
             )
 
+        split_findings = [f for f in code_findings if f.pattern == "missing_split"]
+        if split_findings:
+            hypotheses.append(
+                _make_hypothesis(
+                    investigation_id,
+                    "evaluation_protocol_risk",
+                    "Training script has no detectable validation split",
+                    "Static analysis could not find a train/test or cross-validation split.",
+                    (
+                        "Training and evaluating on the same observations can produce "
+                        "misleading metrics. Static analysis cannot see dynamically imported "
+                        "or framework-specific split logic, so this remains a review flag."
+                    ),
+                    affected=[],
+                    code_paths=[f"line {f.line}" for f in split_findings],
+                )
+            )
+
         # 6) Gemini enrichment (optional)
         if gemini_enabled and self.gemini and self.gemini.is_configured:
             extra = self._gemini_suggest(investigation_id, profile, signals)
             if extra is not None:
                 gemini_used = True
-                for h in extra:
-                    # validate: only real columns and known categories
-                    if h.category not in CATEGORY_LABELS:
-                        continue
-                    h.affected_features = [c for c in h.affected_features if profile.column(c) is not None]
-                    hypotheses.append(h)
+                hypotheses.extend(extra)
 
         return hypotheses, gemini_used
 
@@ -212,20 +248,37 @@ class HypothesisPlanner:
             resp = self.gemini.generate_structured(prompt)
         except Exception:  # noqa: BLE001
             return None
-        if not resp or not isinstance(resp.get("hypotheses"), list):
+        if not isinstance(resp, dict) or not isinstance(resp.get("hypotheses"), list):
             return None
         out = []
         for item in resp["hypotheses"]:
+            if not isinstance(item, dict):
+                return None
+            category = item.get("category")
+            features = item.get("affected_features", [])
+            if not isinstance(category, str) or category not in CATEGORY_LABELS:
+                return None
+            if not isinstance(features, list) or any(
+                not isinstance(c, str) or profile.column(c) is None for c in features
+            ):
+                return None
+            if any(not isinstance(item.get(key, ""), str) for key in ("title", "description", "rationale")):
+                return None
+            if category in ("target_derived_feature", "prediction_time_unavailable", "feature_interaction_leakage") and not features:
+                return None
+            if category == "prediction_time_unavailable" and not set(features).issubset(signals.prediction_time_unavailable):
+                return None
             out.append(
                 CandidateHypothesis(
                     id=_new_id("hyp"),
                     investigation_id=investigation_id,
-                    category=item.get("category", ""),
+                    category=category,
                     title=item.get("title", ""),
                     description=item.get("description", ""),
                     rationale=item.get("rationale", ""),
-                    affected_features=list(item.get("affected_features", [])),
+                    affected_features=list(dict.fromkeys(features)),
                     source="gemini",
+                    confidence=0.2,
                 )
             )
         return out

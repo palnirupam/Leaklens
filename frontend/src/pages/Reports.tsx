@@ -12,22 +12,42 @@ export default function Reports({
   const [selected, setSelected] = useState<string | null>(investigationId);
   const [detail, setDetail] = useState<InvestigationDetail | null>(null);
   const [preview, setPreview] = useState(false);
+  const [error, setError] = useState("");
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
-    api.listInvestigations().then(setInvestigations).catch(() => undefined);
+    let alive = true;
+    api.listInvestigations()
+      .then((items) => alive && setInvestigations(items))
+      .catch((err) => alive && setError(String(err)));
+    return () => { alive = false; };
   }, []);
 
   useEffect(() => {
-    if (!selected) {
-      setDetail(null);
-      return;
-    }
+    setDetail(null);
+    setError("");
+    setPreview(false);
+    if (!selected) return;
+    let alive = true;
     api
       .detail(selected)
-      .then(setDetail)
-      .catch(() => undefined);
-    setPreview(false);
+      .then((report) => alive && setDetail(report))
+      .catch((err) => alive && setError(String(err)));
+    return () => { alive = false; };
   }, [selected]);
+
+  async function download(format: "json" | "html") {
+    if (!selected) return;
+    setError("");
+    setDownloading(true);
+    try {
+      await api.downloadReport(selected, format);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   return (
     <div>
@@ -57,30 +77,32 @@ export default function Reports({
         </select>
       </div>
 
+      {error && <div className="error-box" role="alert">{error}</div>}
+
       {selected && detail && (
         <>
           <div className="cards">
-            <a className="card clickable" href={api.reportUrl(selected, "json")} download>
+            <button type="button" className="card clickable" disabled={downloading} onClick={() => download("json")}>
               <div className="card-icon">｛</div>
               <div className="card-body">
                 <div className="card-label">Download JSON report</div>
                 <div className="card-value">JSON</div>
               </div>
-            </a>
-            <a className="card clickable" href={api.reportUrl(selected, "html")} download>
+            </button>
+            <button type="button" className="card clickable" disabled={downloading} onClick={() => download("html")}>
               <div className="card-icon">⛶</div>
               <div className="card-body">
                 <div className="card-label">Download HTML report</div>
                 <div className="card-value">HTML</div>
               </div>
-            </a>
-            <div className="card clickable" onClick={() => setPreview((p) => !p)}>
+            </button>
+            <button type="button" className="card clickable" aria-expanded={preview} aria-controls="report-preview" onClick={() => setPreview((p) => !p)}>
               <div className="card-icon">▤</div>
               <div className="card-body">
                 <div className="card-label">Quick preview</div>
                 <div className="card-value">…</div>
               </div>
-            </div>
+            </button>
           </div>
 
           <div className="section">
@@ -97,7 +119,7 @@ export default function Reports({
             </div>
 
             {preview && (
-              <details open className="preview">
+              <details open id="report-preview" className="preview">
                 <summary>JSON preview</summary>
                 <pre>{JSON.stringify(detail, null, 2)}</pre>
               </details>

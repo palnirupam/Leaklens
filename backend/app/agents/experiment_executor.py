@@ -15,7 +15,7 @@ where:
 - ``diagnostic_value(a)`` is the fixed expected information gain of experiment ``a``,
 - ``norm_cost(a)`` is its normalized estimated execution cost.
 
-Ties are broken by (score desc, action id asc) so identical inputs always yield
+Ties are broken by hypothesis and action order so identical inputs always yield
 the same experiment ordering (determinism).
 """
 from __future__ import annotations
@@ -48,12 +48,12 @@ def _candidate_experiments(h: CandidateHypothesis) -> list[dict]:
         actions.append({"kind": "duplicate_conflict_check", "params": {}})
     elif cat == "temporal_leakage":
         actions.append({"kind": "temporal_split_compare", "params": {}})
-        for feat in h.affected_features or []:
-            actions.append({"kind": "feature_ablation", "params": {"feature": feat}})
     elif cat == "prediction_time_unavailable":
         for feat in h.affected_features or []:
             actions.append({"kind": "availability_check", "params": {"feature": feat}})
     elif cat == "preprocessing_leakage":
+        actions.append({"kind": "preprocessing_ast_review", "params": {}})
+    elif cat == "evaluation_protocol_risk":
         actions.append({"kind": "preprocessing_ast_review", "params": {}})
     return actions
 
@@ -66,17 +66,19 @@ def _interpret_outcome(h: CandidateHypothesis, result: ExperimentResult) -> bool
         if result.name == "feature_ablation":
             return ev.get("auc_drop", 0.0) > CONFIRM_AUC_DROP
         if result.name == "permutation_test":
-            return interp == "target-linked"
+            return interp == "feature_dependent"
     if h.category == "duplicate_contamination":
-        return interp == "contamination_present"
+        return interp in {
+            "conflicting_duplicate_records",
+            "duplicate_overlap_risk",
+            "entity_overlap_risk",
+        }
     if h.category == "temporal_leakage":
         if result.name == "temporal_split_compare":
             return ev.get("gap_auc", 0.0) > CONFIRM_GAP
-        if result.name == "feature_ablation":
-            return ev.get("auc_drop", 0.0) > CONFIRM_AUC_DROP
     if h.category == "prediction_time_unavailable":
         return True  # availability is a deployment fact from config
-    if h.category == "preprocessing_leakage":
+    if h.category in ("preprocessing_leakage", "evaluation_protocol_risk"):
         return bool(ev.get("code_findings"))
     return False
 
@@ -86,9 +88,10 @@ def _update_confidence(h: CandidateHypothesis, supporting: bool) -> None:
         h.confidence = min(1.0, h.confidence + 0.25)
         h.status = "investigating"
     else:
-        h.confidence = max(0.0, h.confidence - 0.2)
-        if h.confidence <= CONFIDENCE_REJECTED:
-            h.status = "rejected"
+        # A single negative diagnostic must not prevent the remaining,
+        # independent experiment(s) from running.
+        h.confidence = max(0.0, h.confidence - 0.15)
+        h.status = "investigating"
 
 
 class AdaptiveExperimentExecutor:
@@ -107,7 +110,7 @@ class AdaptiveExperimentExecutor:
     # -- priority formula ------------------------------------------------------
     def _evidence_strength(self, h: CandidateHypothesis) -> float:
         if not h.experiments:
-            return 0.3  # small prior so untested hypotheses can still be explored
+            return max(0.1, h.confidence)
         return min(1.0, h.confidence)
 
     def _score(self, h: CandidateHypothesis, action: dict, done: set[str]) -> float:
@@ -130,30 +133,30 @@ class AdaptiveExperimentExecutor:
 
         for _ in range(self.max_experiments):
             # build candidate actions across open hypotheses
-            candidates: list[tuple[float, str, CandidateHypothesis, dict]] = []
-            for h in investigation.hypotheses:
+            candidates: list[tuple[float, int, int, str, CandidateHypothesis, dict]] = []
+            for hypothesis_index, h in enumerate(investigation.hypotheses):
                 if h.status in ("confirmed", "rejected"):
                     continue
-                for action in _candidate_experiments(h):
+                for action_index, action in enumerate(_candidate_experiments(h)):
                     action_id = f"{h.id}::{action['kind']}::{action['params'].get('feature', '')}"
                     if action_id in done:
                         continue
                     score = self._score(h, action, done)
-                    candidates.append((-score, action_id, h, action))  # negate for asc sort
+                    candidates.append((-score, hypothesis_index, action_index, action_id, h, action))
 
             if not candidates:
                 break
 
-            # deterministic order: by (score desc) then action_id asc
-            candidates.sort(key=lambda t: (t[0], t[1]))
-            _, action_id, h, action = candidates[0]
+            # Random hypothesis IDs must not decide which experiment gets the budget.
+            candidates.sort(key=lambda t: t[:3])
+            _, _, _, action_id, h, action = candidates[0]
             done.add(action_id)
 
             # execute
             params = dict(action["params"])
             params.update(
                 {
-                    "experiment_id": f"exp_{action_id[:12].replace('::', '_')}",
+                    "experiment_id": f"exp_{h.id}_{len(investigation.results) + 1}",
                     "hypothesis_id": h.id,
                     "category": h.category,
                     "timestamp_column": self.timestamp_column,

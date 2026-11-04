@@ -2,33 +2,33 @@
   <rect width="100%" height="100%" fill="#0b1220"/>
   <text x="40" y="40" font-size="18" font-weight="700" fill="#e6ecf5">LeakLens benchmark (30 synthetic cases)</text>
   <line x1="40" y1="240" x2="720" y2="240" stroke="#24304d"/>
-  <text x="40" y="260" font-size="12" fill="#64748b">Rule-based baseline</text>
-  <rect x="145" y="246" width="16" height="12" fill="#64748b" rx="2"/>
-  <text x="170" y="260" font-size="12" fill="#94a3b8">LeakLens adaptive</text>
-  <rect x="285" y="246" width="16" height="12" fill="#38bdf8" rx="2"/>
-  <text x='90.0' y='266' text-anchor='middle' font-size='12' fill='#94a3b8'>Precision</text>
+  <rect x="40" y="295" width="16" height="12" fill="#64748b" rx="2"/>
+  <text x="64" y="306" font-size="12" fill="#94a3b8">Rule-based baseline</text>
+  <rect x="220" y="295" width="16" height="12" fill="#38bdf8" rx="2"/>
+  <text x="244" y="306" font-size="12" fill="#94a3b8">LeakLens adaptive</text>
+  <text x='96.0' y='266' text-anchor='middle' font-size='12' fill='#94a3b8'>Precision</text>
 <rect x='60' y='50.0' width='34' height='190.0' fill='#64748b' rx='3'/>
-<rect x='86' y='50.0' width='34' height='190.0' fill='#38bdf8' rx='3'/>
+<rect x='98' y='50.0' width='34' height='190.0' fill='#38bdf8' rx='3'/>
 <text x='77.0' y='44.0' text-anchor='middle' font-size='11' fill='#94a3b8'>1.000</text>
-<text x='103.0' y='44.0' text-anchor='middle' font-size='11' fill='#e6ecf5'>1.000</text>
-<text x='210.0' y='266' text-anchor='middle' font-size='12' fill='#94a3b8'>Recall</text>
-<rect x='180' y='50.0' width='34' height='190.0' fill='#64748b' rx='3'/>
-<rect x='206' y='50.0' width='34' height='190.0' fill='#38bdf8' rx='3'/>
-<text x='197.0' y='44.0' text-anchor='middle' font-size='11' fill='#94a3b8'>1.000</text>
-<text x='223.0' y='44.0' text-anchor='middle' font-size='11' fill='#e6ecf5'>1.000</text>
-<text x='330.0' y='266' text-anchor='middle' font-size='12' fill='#94a3b8'>F1</text>
-<rect x='300' y='50.0' width='34' height='190.0' fill='#64748b' rx='3'/>
-<rect x='326' y='50.0' width='34' height='190.0' fill='#38bdf8' rx='3'/>
-<text x='317.0' y='44.0' text-anchor='middle' font-size='11' fill='#94a3b8'>1.000</text>
-<text x='343.0' y='44.0' text-anchor='middle' font-size='11' fill='#e6ecf5'>1.000</text>
-<text x='450.0' y='266' text-anchor='middle' font-size='12' fill='#94a3b8'>FPR (clean)</text>
-<rect x='420' y='240.0' width='34' height='0.0' fill='#64748b' rx='3'/>
-<rect x='446' y='240.0' width='34' height='0.0' fill='#38bdf8' rx='3'/>
-<text x='437.0' y='234.0' text-anchor='middle' font-size='11' fill='#94a3b8'>0.000</text>
-<text x='463.0' y='234.0' text-anchor='middle' font-size='11' fill='#e6ecf5'>0.000</text>
-<text x='570.0' y='266' text-anchor='middle' font-size='12' fill='#94a3b8'>Root-cause acc</text>
-<rect x='540' y='88.0' width='34' height='152.0' fill='#64748b' rx='3'/>
-<rect x='566' y='50.0' width='34' height='190.0' fill='#38bdf8' rx='3'/>
-<text x='557.0' y='82.0' text-anchor='middle' font-size='11' fill='#94a3b8'>0.800</text>
-<text x='583.0' y='44.0' text-anchor='middle' font-size='11' fill='#e6ecf5'>1.000</text>
+<text x='115.0' y='44.0' text-anchor='middle' font-size='11' fill='#e6ecf5'>1.000</text>
+<text x='240.0' y='266' text-anchor='middle' font-size='12' fill='#94a3b8'>Recall</text>
+<rect x='204' y='88.0' width='34' height='152.0' fill='#64748b' rx='3'/>
+<rect x='242' y='88.0' width='34' height='152.0' fill='#38bdf8' rx='3'/>
+<text x='221.0' y='82.0' text-anchor='middle' font-size='11' fill='#94a3b8'>0.800</text>
+<text x='259.0' y='82.0' text-anchor='middle' font-size='11' fill='#e6ecf5'>0.800</text>
+<text x='384.0' y='266' text-anchor='middle' font-size='12' fill='#94a3b8'>F1</text>
+<rect x='348' y='71.09' width='34' height='168.91' fill='#64748b' rx='3'/>
+<rect x='386' y='71.09' width='34' height='168.91' fill='#38bdf8' rx='3'/>
+<text x='365.0' y='65.09' text-anchor='middle' font-size='11' fill='#94a3b8'>0.889</text>
+<text x='403.0' y='65.09' text-anchor='middle' font-size='11' fill='#e6ecf5'>0.889</text>
+<text x='528.0' y='266' text-anchor='middle' font-size='12' fill='#94a3b8'>FPR (clean)</text>
+<rect x='492' y='240.0' width='34' height='0.0' fill='#64748b' rx='3'/>
+<rect x='530' y='240.0' width='34' height='0.0' fill='#38bdf8' rx='3'/>
+<text x='509.0' y='234.0' text-anchor='middle' font-size='11' fill='#94a3b8'>0.000</text>
+<text x='547.0' y='234.0' text-anchor='middle' font-size='11' fill='#e6ecf5'>0.000</text>
+<text x='672.0' y='266' text-anchor='middle' font-size='12' fill='#94a3b8'>Root-cause acc</text>
+<rect x='636' y='88.0' width='34' height='152.0' fill='#64748b' rx='3'/>
+<rect x='674' y='88.0' width='34' height='152.0' fill='#38bdf8' rx='3'/>
+<text x='653.0' y='82.0' text-anchor='middle' font-size='11' fill='#94a3b8'>0.800</text>
+<text x='691.0' y='82.0' text-anchor='middle' font-size='11' fill='#e6ecf5'>0.800</text>
 </svg>

@@ -36,7 +36,8 @@ FIT_NAMES = {
     "PCA", "SelectKBest", "SelectFromModel", "RFE", "VarianceThreshold",
     "RandomOverSampler", "SMOTE", "ADASYN", "TomekLinks",
 }
-TRANSFORM_METHODS = {"fit", "fit_transform", "transform"}
+FIT_METHODS = {"fit", "fit_transform", "fit_resample"}
+TRANSFORM_METHODS = FIT_METHODS | {"transform"}
 SPLIT_NAMES = {"train_test_split", "StratifiedKFold", "KFold", "cross_val_score", "GridSearchCV"}
 
 
@@ -60,8 +61,8 @@ class _LeakVisitor(ast.NodeVisitor):
         self.findings: list[CodeFinding] = []
         self.saw_split = False
         self._split_outputs: set[str] = set()
-        # objects we have applied a suspicious fit to (name -> (line, snippet))
-        self._fitted_objects: dict[str, tuple[int, str]] = {}
+        # Assigned transformer/oversampler instances (variable -> constructor).
+        self._transformer_objects: dict[str, str] = {}
         self._library_imports: set[str] = set()
 
     def _snippet(self, node: ast.AST) -> str:
@@ -107,6 +108,15 @@ class _LeakVisitor(ast.NodeVisitor):
                         nm = self._name_of(elt)
                         if nm:
                             self._split_outputs.add(nm)
+        # Track the common two-step form:
+        #   scaler = StandardScaler()
+        #   scaler.fit_transform(X)
+        if isinstance(node.value, ast.Call) and self._is_transformer_call(node.value):
+            constructor = self._name_of(node.value.func) or "transformer"
+            for target in node.targets:
+                name = self._name_of(target)
+                if name:
+                    self._transformer_objects[name] = constructor
         self.generic_visit(node)
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
@@ -115,6 +125,11 @@ class _LeakVisitor(ast.NodeVisitor):
             nm = self._name_of(node.target)
             if nm:
                 self._split_outputs.add(nm)
+        if node.value and isinstance(node.value, ast.Call) and self._is_transformer_call(node.value):
+            name = self._name_of(node.target)
+            constructor = self._name_of(node.value.func) or "transformer"
+            if name:
+                self._transformer_objects[name] = constructor
         self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call) -> None:
@@ -127,11 +142,8 @@ class _LeakVisitor(ast.NodeVisitor):
                 if ctor in FIT_NAMES:
                     self._record_inline_fit(node)
                     return
-            if obj and obj in FIT_NAMES:
-                return  # constructor inside assignment, skip
-            # object.fit(...) / object.fit_transform(...)
-            if fname in ("fit", "fit_transform") and obj:
-                self._fitted_objects[obj] = (node.lineno, self._snippet(node))
+            if fname in FIT_METHODS and obj in self._transformer_objects:
+                self._record_object_fit(node, obj, fname)
             return
 
         if self._is_transformer_call(node):
@@ -146,7 +158,7 @@ class _LeakVisitor(ast.NodeVisitor):
         if not isinstance(node.func, ast.Attribute):
             return
         meth = node.func.attr
-        if meth not in ("fit", "fit_transform"):
+        if meth not in FIT_METHODS:
             return
         args = node.args or []
         if not args:
@@ -166,6 +178,28 @@ class _LeakVisitor(ast.NodeVisitor):
                     f"Transformer method `{meth}` called on `{data_arg}` — this argument "
                     "does not appear to be a train-split output, so the transform may be "
                     "fitted on the whole dataset (suspected leakage)."
+                ),
+                code_snippet=self._snippet(node),
+            )
+        )
+
+    def _record_object_fit(self, node: ast.Call, obj: str, method: str) -> None:
+        args = node.args or []
+        if not args:
+            return
+        data_arg = self._name_of(args[0])
+        if data_arg is None or data_arg in self._split_outputs:
+            return
+        constructor = self._transformer_objects.get(obj, "transformer")
+        self.findings.append(
+            CodeFinding(
+                line=node.lineno,
+                pattern="preprocessing_before_split",
+                severity="high",
+                message=(
+                    f"`{obj}` ({constructor}) calls `{method}` on `{data_arg}`, which "
+                    "does not appear to be a train-split output. The preprocessing or "
+                    "resampling step may therefore be fitted on the full dataset."
                 ),
                 code_snippet=self._snippet(node),
             )

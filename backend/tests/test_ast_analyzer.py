@@ -48,3 +48,42 @@ def test_clean_script_no_preprocessing_flag():
 def test_parse_error_surfaces():
     a = analyze_script("def broken(:")
     assert a.parse_error is not None
+
+
+def test_assigned_transformer_fit_before_split_is_flagged():
+    source = """
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+X_train, X_test, y_train, y_test = train_test_split(X_scaled, y)
+"""
+    a = analyze_script(source)
+    findings = [f for f in a.findings if f.pattern == "preprocessing_before_split"]
+    assert len(findings) == 1
+    assert "scaler" in findings[0].message
+
+
+def test_assigned_transformer_fit_on_train_split_is_clean():
+    source = """
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+X_train, X_test, y_train, y_test = train_test_split(X, y)
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+"""
+    a = analyze_script(source)
+    assert not [f for f in a.findings if f.pattern == "preprocessing_before_split"]
+
+
+def test_assigned_oversampler_before_split_is_flagged():
+    source = """
+from imblearn.over_sampling import SMOTE
+from sklearn.model_selection import train_test_split
+sampler = SMOTE()
+X_resampled, y_resampled = sampler.fit_resample(X, y)
+X_train, X_test, y_train, y_test = train_test_split(X_resampled, y_resampled)
+"""
+    a = analyze_script(source)
+    assert [f for f in a.findings if f.pattern == "preprocessing_before_split"]

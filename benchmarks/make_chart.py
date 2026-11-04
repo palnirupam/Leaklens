@@ -19,7 +19,7 @@ def _bars(data: dict, keys: list[str]) -> str:
     labels = {"precision": "Precision", "recall": "Recall", "f1": "F1",
               "false_positive_rate_clean": "FPR (clean)", "root_cause_accuracy": "Root-cause acc"}
     bar_w = 34
-    gap = 60
+    gap = 72
     y0 = 240
     max_v = 1.0
     scale = 190.0
@@ -55,12 +55,12 @@ def main() -> int:
     inner = _bars(data, keys)
     svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="760" height="340" viewBox="0 0 760 340">
   <rect width="100%" height="100%" fill="#0b1220"/>
-  <text x="40" y="40" font-size="18" font-weight="700" fill="#e6ecf5">LeakLens benchmark (30 synthetic cases)</text>
+  <text x="40" y="40" font-size="18" font-weight="700" fill="#e6ecf5">LeakLens benchmark ({data['n_cases']} synthetic cases)</text>
   <line x1="40" y1="240" x2="720" y2="240" stroke="#24304d"/>
-  <text x="40" y="260" font-size="12" fill="#64748b">Rule-based baseline</text>
-  <rect x="145" y="246" width="16" height="12" fill="#64748b" rx="2"/>
-  <text x="170" y="260" font-size="12" fill="#94a3b8">LeakLens adaptive</text>
-  <rect x="285" y="246" width="16" height="12" fill="#38bdf8" rx="2"/>
+  <rect x="40" y="295" width="16" height="12" fill="#64748b" rx="2"/>
+  <text x="64" y="306" font-size="12" fill="#94a3b8">Rule-based baseline</text>
+  <rect x="220" y="295" width="16" height="12" fill="#38bdf8" rx="2"/>
+  <text x="244" y="306" font-size="12" fill="#94a3b8">LeakLens adaptive</text>
   {inner}
 </svg>"""
     OUT.write_text(svg, encoding="utf-8")

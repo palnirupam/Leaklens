@@ -32,3 +32,35 @@ def test_clean_has_no_signals():
     sig = detect_signals(c.df, prof, c.target)
     assert sig.high_association_features == []
     assert sig.conflicting_duplicates == 0
+
+
+def test_string_target_profiles_without_crashing():
+    import pandas as pd
+
+    df = pd.DataFrame(
+        {
+            "amount": list(range(20)),
+            "segment": ["a", "b"] * 10,
+            "target": ["no"] * 10 + ["yes"] * 10,
+        }
+    )
+    prof = investigate(df, "target")
+    assert prof.target_is_binary is True
+    assert prof.column("amount").target_association > 0.5
+
+
+def test_repeated_entities_are_exposed_as_split_risk():
+    import pandas as pd
+
+    df = pd.DataFrame(
+        {
+            "customer_id": [1, 1, 2, 2, 3, 4],
+            "x": [0, 1, 0, 1, 0, 1],
+            "target": [0, 1, 0, 0, 1, 1],
+        }
+    )
+    prof = investigate(df, "target")
+    sig = detect_signals(df, prof, "target", entity_column="customer_id")
+    assert sig.repeated_entities == 2
+    assert sig.repeated_entity_rows == 4
+    assert sig.entity_conflicts == 1

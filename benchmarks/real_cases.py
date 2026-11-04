@@ -115,7 +115,9 @@ def _inject_duplicates(case: RealCase, rng: np.random.Generator) -> None:
     dup_idx = rng.choice(np.arange(half), size=max(1, half // 3), replace=False)
     dup_rows = df.iloc[dup_idx].copy()
     flip = rng.random(len(dup_rows)) < 0.4
-    dup_rows.loc[flip, "target"] = 1 - dup_rows.loc[flip, "target"]
+    classes = df["target"].unique()
+    replacements = dict(zip(classes, np.roll(classes, -1)))
+    dup_rows.loc[flip, "target"] = dup_rows.loc[flip, "target"].map(replacements)
     case.df = pd.concat([df, dup_rows], ignore_index=True)
     case.leaked_features = []
 

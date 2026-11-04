@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -35,23 +36,25 @@ class Store:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+        self._lock = threading.RLock()
         self._create()
 
     def _create(self) -> None:
-        self._conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS investigations (
-                id TEXT PRIMARY KEY,
-                status TEXT,
-                created_at TEXT,
-                finished_at TEXT,
-                updated_at TEXT,
-                display_title TEXT,
-                payload TEXT
+        with self._lock:
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS investigations (
+                    id TEXT PRIMARY KEY,
+                    status TEXT,
+                    created_at TEXT,
+                    finished_at TEXT,
+                    updated_at TEXT,
+                    display_title TEXT,
+                    payload TEXT
+                )
+                """
             )
-            """
-        )
-        self._conn.commit()
+            self._conn.commit()
 
     # -- helpers ------------------------------------------------------------
     def _row_to_investigation(self, row: sqlite3.Row) -> Investigation:
@@ -61,47 +64,52 @@ class Store:
     # -- write ---------------------------------------------------------------
     def save(self, inv: Investigation) -> None:
         now = _utcnow()
-        self._conn.execute(
-            """
-            INSERT INTO investigations (id, status, created_at, finished_at, updated_at, display_title, payload)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                status=excluded.status,
-                finished_at=excluded.finished_at,
-                updated_at=excluded.updated_at,
-                display_title=excluded.display_title,
-                payload=excluded.payload
-            """,
-            (
-                inv.id,
-                inv.status,
-                inv.created_at,
-                inv.finished_at,
-                now,
-                _display_title(inv),
-                json.dumps(inv.__dict__, default=_json_default),
-            ),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO investigations (id, status, created_at, finished_at, updated_at, display_title, payload)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    status=excluded.status,
+                    finished_at=excluded.finished_at,
+                    updated_at=excluded.updated_at,
+                    display_title=excluded.display_title,
+                    payload=excluded.payload
+                """,
+                (
+                    inv.id,
+                    inv.status,
+                    inv.created_at,
+                    inv.finished_at,
+                    now,
+                    _display_title(inv),
+                    json.dumps(inv.__dict__, default=_json_default),
+                ),
+            )
+            self._conn.commit()
 
     # -- read / list ----------------------------------------------------------
     def get(self, investigation_id: str) -> Optional[Investigation]:
-        cur = self._conn.execute("SELECT * FROM investigations WHERE id=?", (investigation_id,))
-        row = cur.fetchone()
+        with self._lock:
+            cur = self._conn.execute("SELECT * FROM investigations WHERE id=?", (investigation_id,))
+            row = cur.fetchone()
         return self._row_to_investigation(row) if row else None
 
     def list(self, limit: int = 50) -> list[Investigation]:
-        cur = self._conn.execute(
-            "SELECT * FROM investigations ORDER BY created_at DESC LIMIT ?", (limit,)
-        )
-        return [self._row_to_investigation(r) for r in cur.fetchall()]
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT * FROM investigations ORDER BY created_at DESC LIMIT ?", (limit,)
+            )
+            rows = cur.fetchall()
+        return [self._row_to_investigation(r) for r in rows]
 
     def count(self, status: Optional[str] = None) -> int:
-        if status:
-            cur = self._conn.execute("SELECT COUNT(*) FROM investigations WHERE status=?", (status,))
-        else:
-            cur = self._conn.execute("SELECT COUNT(*) FROM investigations")
-        return int(cur.fetchone()[0])
+        with self._lock:
+            if status:
+                cur = self._conn.execute("SELECT COUNT(*) FROM investigations WHERE status=?", (status,))
+            else:
+                cur = self._conn.execute("SELECT COUNT(*) FROM investigations")
+            return int(cur.fetchone()[0])
 
 
 def _display_title(inv: Investigation) -> str:

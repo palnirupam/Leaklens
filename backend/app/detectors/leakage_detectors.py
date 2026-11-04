@@ -15,7 +15,7 @@ from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import StratifiedKFold
 from sklearn.tree import DecisionTreeClassifier
 
-from app.ml.pipeline import evaluate_split
+from app.ml.pipeline import encode_target, evaluate_split
 
 # association threshold above which a feature is flagged "suspiciously predictive"
 HIGH_ASSOCIATION = 0.5
@@ -31,6 +31,8 @@ class DetectionSignals:
     conflicting_duplicates: int = 0
     #: entity-level overlap signal (rows sharing an entity value with mixed labels)
     entity_conflicts: int = 0
+    repeated_entities: int = 0
+    repeated_entity_rows: int = 0
     entity_column: Optional[str] = None
     #: temporal random-vs-chronological comparison (dict or None)
     temporal: Optional[dict] = None
@@ -75,9 +77,13 @@ def detect_signals(
     # entity overlap
     if entity_column and entity_column in df.columns:
         signals.entity_column = entity_column
-        if df[entity_column].nunique() < len(df):
+        counts = df[entity_column].value_counts(dropna=False)
+        repeated = counts[counts > 1]
+        signals.repeated_entities = int(len(repeated))
+        signals.repeated_entity_rows = int(repeated.sum()) if len(repeated) else 0
+        if signals.repeated_entities:
             ent = df[[entity_column, target_column]].copy()
-            g = ent.groupby(entity_column)[target_column].nunique()
+            g = ent.groupby(entity_column, dropna=False)[target_column].nunique()
             signals.entity_conflicts = int((g > 1).sum())
 
     # 3) temporal leak: random vs chronological split
@@ -112,18 +118,35 @@ def _pair_auc(
 ) -> float:
     """Cross-validated ROC-AUC of a shallow decision tree on the given features."""
     X = sub[feats].to_numpy(dtype=float)
-    y = sub[target].to_numpy(dtype=int)
-    skf = StratifiedKFold(n_splits=3, shuffle=True, random_state=seed)
+    y = encode_target(sub, target)
+    classes, counts = np.unique(y, return_counts=True)
+    n_splits = min(3, int(counts.min()))
+    if len(classes) < 2 or n_splits < 2:
+        return 0.5
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
     aucs: list[float] = []
     for tr, te in skf.split(X, y):
         if len(np.unique(y[tr])) < 2:
             continue
         clf = DecisionTreeClassifier(max_depth=4, random_state=seed)
         clf.fit(X[tr], y[tr])
-        if clf.predict_proba(X[te]).shape[1] < 2:
+        probabilities = clf.predict_proba(X[te])
+        if probabilities.shape[1] < 2:
             continue
-        prob = clf.predict_proba(X[te])[:, 1]
-        aucs.append(float(roc_auc_score(y[te], prob)))
+        if len(clf.classes_) == 2:
+            aucs.append(float(roc_auc_score(y[te], probabilities[:, 1])))
+        else:
+            aucs.append(
+                float(
+                    roc_auc_score(
+                        y[te],
+                        probabilities,
+                        labels=clf.classes_,
+                        multi_class="ovr",
+                        average="weighted",
+                    )
+                )
+            )
     return float(np.mean(aucs)) if aucs else 0.5
 
 

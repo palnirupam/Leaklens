@@ -43,3 +43,23 @@ def test_health_stays_open(monkeypatch):
     client = TestClient(app)
     r = client.get("/api/health")
     assert r.status_code == 200
+
+
+def test_report_downloads_require_authentication(monkeypatch, tmp_path):
+    from app.api import investigations
+    from app.core.config import settings
+    from app.core.models import Investigation, InvestigationConfig
+    from app.core.store import Store
+    from app.main import app
+
+    store = Store(tmp_path / "reports.db")
+    store.save(Investigation("inv_report", InvestigationConfig("", "target")))
+    monkeypatch.setattr(investigations, "_store", store)
+    monkeypatch.setattr(settings, "api_key", "test-token")
+    with TestClient(app) as client:
+        for format in ("json", "html"):
+            url = f"/api/investigations/inv_report/report?format={format}"
+            assert client.get(url).status_code == 401
+            response = client.get(url, headers={"X-API-Key": "test-token"})
+            assert response.status_code == 200
+            assert f"investigation_inv_report.{format}" in response.headers["content-disposition"]

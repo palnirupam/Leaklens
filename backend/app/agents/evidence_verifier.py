@@ -44,6 +44,10 @@ CORRECTIONS = {
         "Move all preprocessing (scaling, imputation, encoding, oversampling) inside "
         "a pipeline that is fitted on the training split only."
     ),
+    "evaluation_protocol_risk": (
+        "Add a held-out test split or cross-validation. Keep preprocessing inside "
+        "the validation pipeline so evaluation rows never influence training."
+    ),
 }
 
 
@@ -69,21 +73,36 @@ class EvidenceVerifier:
             return None
 
         # Static preprocessing suspicion -> potential finding (not proven).
-        if h.category == "preprocessing_leakage":
+        if h.category in ("preprocessing_leakage", "evaluation_protocol_risk"):
             if supporting:
-                return self._build(
-                    investigation, h, "potential", "suspicious",
+                description = (
                     "Static analysis flagged preprocessing-before-split patterns; "
-                    "runtime leakage is not proven without a pipeline experiment.",
+                    "runtime leakage is not proven without a pipeline experiment."
+                    if h.category == "preprocessing_leakage"
+                    else "Static analysis could not find a validation split. Review the "
+                    "runtime training path because dynamic split logic may not be visible."
+                )
+                return self._build(
+                    investigation, h, "medium", "suspicious",
+                    description,
+                    verified_by="static_analysis",
                 )
             return None
 
         # Availability is a deployment fact, reported as info/low (not a leak).
         if h.category == "prediction_time_unavailable":
+            if not h.affected_features or not set(h.affected_features).issubset(
+                investigation.config.unavailable_at_prediction
+            ):
+                h.status = "rejected"
+                return None
+            if not supporting:
+                h.status = "inconclusive"
             return self._build(
                 investigation, h, "low", "suspicious",
                 "Feature is unavailable at prediction time. This is a deployment "
                 "hazard, not evidence of train/test contamination.",
+                verified_by="configuration",
             )
 
         # Interaction flags are review-only — never auto-confirmed as leakage.
@@ -109,6 +128,19 @@ class EvidenceVerifier:
             # we have results but none support -> reject hypothesis
             h.status = "rejected"
             return None
+
+        # Dataset-level duplicates and repeated entities establish a split-risk,
+        # not proof that a particular train/test split was contaminated.
+        if h.category == "duplicate_contamination":
+            h.status = "investigating"
+            return self._build(
+                investigation,
+                h,
+                "medium",
+                "potential",
+                self._describe_evidence(h, supporting),
+                verified_by="experiment",
+            )
 
         # Confidence based on number of corroborating experiments.
         n_support = len(supporting)
@@ -142,18 +174,20 @@ class EvidenceVerifier:
             if r.name == "feature_ablation":
                 return ev.get("auc_drop", 0.0) > 0.10
             if r.name == "permutation_test":
-                return interp == "target-linked"
+                return interp == "feature_dependent"
         if h.category == "duplicate_contamination":
-            return interp == "contamination_present"
+            return interp in {
+                "conflicting_duplicate_records",
+                "duplicate_overlap_risk",
+                "entity_overlap_risk",
+            }
         if h.category == "temporal_leakage":
             if r.name == "temporal_split_compare":
                 return ev.get("gap_auc", 0.0) > 0.10
-            if r.name == "feature_ablation":
-                return ev.get("auc_drop", 0.0) > 0.10
         if h.category == "prediction_time_unavailable":
             return True
-        if h.category == "preprocessing_leakage":
-            return True
+        if h.category in ("preprocessing_leakage", "evaluation_protocol_risk"):
+            return bool(ev.get("code_findings"))
         return False
 
     def _describe_evidence(self, h: CandidateHypothesis, supporting) -> str:
@@ -185,6 +219,11 @@ class EvidenceVerifier:
             code_paths=h.code_paths,
             supporting_experiments=h.experiments,
             correction=CORRECTIONS.get(h.category, ""),
-            verification_status="supported_by_experiment" if verified_by else "unverified",
+            verification_status=(
+                "supported_by_experiment" if verified_by == "experiment"
+                else "supported_by_static_analysis" if verified_by == "static_analysis"
+                else "supported_by_configuration" if verified_by == "configuration"
+                else "unverified"
+            ),
             verified_by=verified_by,
         )

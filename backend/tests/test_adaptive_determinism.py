@@ -45,3 +45,32 @@ def test_executor_deterministic_on_temporal():
     b = _run_on("temporal_leakage", seed=9)
     assert _decision_path(a) == _decision_path(b)
     assert sorted(f.category for f in a.findings) == sorted(f.category for f in b.findings)
+
+
+def test_equal_priority_ignores_random_ids_and_experiment_ids_are_unique(monkeypatch):
+    import pandas as pd
+    from app.agents import experiment_executor
+    from app.core.models import CandidateHypothesis, ExperimentResult, Investigation
+
+    def experiment(kind, df, target, params, seed):
+        return ExperimentResult(
+            experiment_id=params["experiment_id"], hypothesis_id=params["hypothesis_id"],
+            name=kind, category=params["category"], status="completed", config=params,
+        )
+
+    monkeypatch.setattr(experiment_executor, "run_experiment", experiment)
+
+    def run(ids):
+        inv = Investigation("inv_test", InvestigationConfig("", "target"))
+        inv.hypotheses = [CandidateHypothesis(
+            id=hyp_id, investigation_id=inv.id, category="target_derived_feature",
+            title=feature, description="", rationale="", affected_features=[feature], confidence=0.3,
+        ) for hyp_id, feature in zip(ids, ("first", "second"))]
+        experiment_executor.AdaptiveExperimentExecutor().execute(inv, pd.DataFrame(), "target", [])
+        return inv
+
+    a = run(("hyp_zzzzzzzz", "hyp_aaaaaaaa"))
+    b = run(("hyp_aaaaaaaa", "hyp_zzzzzzzz"))
+    assert _decision_path(a) == _decision_path(b)
+    assert len(a.results) == 4
+    assert len({r.experiment_id for r in a.results}) == 4

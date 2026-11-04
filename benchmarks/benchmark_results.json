@@ -3,35 +3,35 @@
   "n_cases": 30,
   "rule_based_baseline": {
     "n_cases": 30,
-    "true_pos": 30,
+    "true_pos": 24,
     "false_pos": 0,
-    "false_neg": 0,
+    "false_neg": 6,
     "precision": 1.0,
-    "recall": 1.0,
-    "f1": 1.0,
+    "recall": 0.8,
+    "f1": 0.889,
     "false_positive_rate_clean": 0.0,
     "root_cause_accuracy": 0.8,
     "mean_experiments": 0.0,
-    "mean_seconds": 0.35,
-    "total_seconds": 10.4
+    "mean_seconds": 0.4,
+    "total_seconds": 11.9
   },
   "leaklens_adaptive": {
     "n_cases": 30,
-    "true_pos": 30,
+    "true_pos": 24,
     "false_pos": 0,
-    "false_neg": 0,
+    "false_neg": 6,
     "precision": 1.0,
-    "recall": 1.0,
-    "f1": 1.0,
+    "recall": 0.8,
+    "f1": 0.889,
     "false_positive_rate_clean": 0.0,
-    "root_cause_accuracy": 1.0,
-    "mean_experiments": 1.6,
-    "mean_seconds": 0.45,
-    "total_seconds": 13.4
+    "root_cause_accuracy": 0.8,
+    "mean_experiments": 1.4,
+    "mean_seconds": 0.54,
+    "total_seconds": 16.2
   },
-  "run_all_experiments_mean": 1.8,
+  "run_all_experiments_mean": 1.4,
   "gemini_only": {
     "status": "skipped (no GEMINI_API_KEY configured)"
   },
-  "note": "LeakLens adaptive uses the same signals as the rule-based baseline but confirms them with budget-aware experiments and can still reach comparable recall while keeping the experiment count small."
+  "note": "LeakLens adaptive uses the same signals as the rule-based baseline but investigates them with budget-aware experiments. Metrics count all reported findings, including review flags; they do not measure confirmed leakage alone. Experiment counts exclude profiling and signal calculations."
 }
